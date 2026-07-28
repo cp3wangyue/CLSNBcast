@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
   BadRequestException,
@@ -125,6 +126,102 @@ export class SuperAdminController {
   }
 
   // ===== Server Management =====
+
+  @Get('spaces')
+  listSpaces(@Query('platform') platform?: string) {
+    return this.db.listSpaces(platform || undefined).map((s) => ({
+      spaceId: s.serverId,
+      platform: s.platform,
+      externalId: s.externalId,
+      serverId: s.externalId,
+      openId: s.openId,
+      guildName: s.guildName,
+      ownerId: s.ownerId,
+      ownerUsername: s.ownerUsername,
+      bound: !!s.bound,
+      status: s.status,
+      agoraAppId: s.agoraAppId ? '******' : '',
+      createdAt: s.createdAt,
+    }));
+  }
+
+  @Get('spaces/:platform/:externalId')
+  getSpace(
+    @Param('platform') platform: string,
+    @Param('externalId') externalId: string,
+  ) {
+    const s = this.db.getSpace(platform, externalId);
+    if (!s) return { ok: false, message: '平台空间不存在' };
+    return {
+      spaceId: s.serverId,
+      platform: s.platform,
+      externalId: s.externalId,
+      serverId: s.externalId,
+      openId: s.openId,
+      guildName: s.guildName,
+      ownerId: s.ownerId,
+      ownerUsername: s.ownerUsername,
+      bound: !!s.bound,
+      status: s.status,
+      agoraAppId: s.agoraAppId,
+      agoraAppCertificate: s.agoraAppCertificate ? '******' : '',
+      agoraTokenExpireSec: s.agoraTokenExpireSec,
+      allowedQualities: JSON.parse(s.allowedQualities),
+      enabledTriggerWords: s.triggerWords.split(',').map(word => word.trim()).filter(Boolean),
+      triggerWordLabels: this.db.getGlobalConfig().triggerWordLabels,
+      idleTimeoutSec: s.idleTimeoutSec,
+      heartbeatIntervalSec: s.heartbeatIntervalSec,
+      noViewerTimeoutSec: s.noViewerTimeoutSec,
+      publicDomain: this.db.getGlobalConfig().publicDomain,
+      allowLowLatency: s.allowLowLatency,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    };
+  }
+
+  @Get('spaces/:platform/:externalId/events')
+  getSpaceEvents(
+    @Param('platform') platform: string,
+    @Param('externalId') externalId: string,
+  ) {
+    const space = this.db.getSpace(platform, externalId);
+    return space ? this.db.getServerEvents(space.serverId) : [];
+  }
+
+  @Get('spaces/:platform/:externalId/sessions')
+  getSpaceSessions(
+    @Param('platform') platform: string,
+    @Param('externalId') externalId: string,
+  ) {
+    const space = this.db.getSpace(platform, externalId);
+    if (!space) return [];
+    return this.db.getSessionsByServer(space.serverId).map(s => ({
+      ...s,
+      sharerUserId: maskUserId(s.sharerUserId),
+    }));
+  }
+
+  @Put('spaces/:platform/:externalId')
+  updateSpace(
+    @Param('platform') platform: string,
+    @Param('externalId') externalId: string,
+    @Body() dto: UpdateServerDto,
+  ) {
+    const space = this.db.getSpace(platform, externalId);
+    if (!space) return { ok: false, message: '平台空间不存在' };
+    return this.updateServer(space.serverId, dto);
+  }
+
+  @Delete('spaces/:platform/:externalId')
+  deleteSpace(
+    @Param('platform') platform: string,
+    @Param('externalId') externalId: string,
+  ) {
+    const space = this.db.getSpace(platform, externalId);
+    if (!space) return { ok: false, message: '平台空间不存在' };
+    this.db.deleteServer(space.serverId);
+    return { ok: true };
+  }
 
   @Get('servers')
   listServers() {

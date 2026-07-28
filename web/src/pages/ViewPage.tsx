@@ -13,13 +13,13 @@ import {
   Link2,
   CheckCircle2,
   Copy,
-  X,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useSessionSSE } from '../hooks/useSessionSSE';
 import { useAgoraView } from '../hooks/useAgoraView';
 import { cn, copyToClipboard } from '../lib/utils';
 import type { SessionInfo } from '../types';
+import { NoticeBanners } from '../components/notices/NoticeCenter';
 
 export default function ViewPage() {
   const [params] = useSearchParams();
@@ -40,9 +40,6 @@ export default function ViewPage() {
   const active = socket.status === 'active' || socket.status === 'grace';
   const view = useAgoraView(token, active, socket.lowLatency ?? false);
   const screenRef = useRef<HTMLDivElement | null>(null);
-  const [tipDismissed, setTipDismissed] = useState(() => sessionStorage.getItem('viewTipDismissed') === '1');
-  const dismissTip = useCallback(() => { setTipDismissed(true); sessionStorage.setItem('viewTipDismissed', '1'); }, []);
-
   useEffect(() => {
     if (!token) {
       setLoadError('缺少观看令牌');
@@ -211,21 +208,7 @@ export default function ViewPage() {
         'flex-1 flex flex-col items-center justify-center',
         !isFullscreen && 'pt-16 pb-8 px-4'
       )}>
-        {/* 画质自适应提示：首次接入时展示，告知用户码率会逐步提升 */}
-        {!tipDismissed && view.hasVideo && !socket.ended && (
-          <div className="w-full max-w-6xl mb-2 glass rounded-lg px-4 py-2.5 flex items-start gap-2 text-xs text-muted">
-            <span className="flex-1 leading-relaxed">
-              首次接入时系统将根据网络情况动态调整码率，稍加等待视频会逐步增加清晰度和流畅度。
-            </span>
-            <button
-              onClick={dismissTip}
-              className="p-0.5 rounded text-dim hover:text-white transition-colors flex-shrink-0"
-              title="关闭提示"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
+        {!isFullscreen && <div className="w-full max-w-6xl"><NoticeBanners /></div>}
         <div
           ref={screenRef}
           onMouseMove={handleMouseMove}

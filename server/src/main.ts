@@ -90,8 +90,8 @@ async function bootstrap() {
   });
 
   // ===== Auth middleware =====
-  // Protects /api/super/* and /api/server/* endpoints.
-  // Public exceptions: /api/super/login, /api/server/:id/login|status|bind
+  // Protects /api/super/*, legacy /api/server/* and canonical /api/spaces/* endpoints.
+  // Public exceptions: login/status/bind for a specific platform space.
   app.use((req: any, res: any, next: any) => {
     const path = req.path;
 
@@ -100,6 +100,9 @@ async function bootstrap() {
       needsAuth = path !== '/api/super/login';
     }
     if (path.startsWith('/api/server')) {
+      needsAuth = !/\/(login|status|bind)$/.test(path);
+    }
+    if (path.startsWith('/api/spaces')) {
       needsAuth = !/\/(login|status|bind)$/.test(path);
     }
 
@@ -135,6 +138,12 @@ async function bootstrap() {
         return res.status(401).json({ message: '服务器不存在' });
       }
       hmacKey = (server as any).serverSecret || SUPER_SECRET; // fallback to legacy shared secret
+    } else if (payload.role === 'space_admin') {
+      const server = db.getSpace(payload.platform, payload.externalId);
+      if (!server || server.serverId !== payload.spaceId) {
+        return res.status(401).json({ message: '平台空间不存在' });
+      }
+      hmacKey = server.serverSecret || SUPER_SECRET;
     } else {
       return res.status(401).json({ message: '无效的登录凭证' });
     }
@@ -150,9 +159,27 @@ async function bootstrap() {
         return res.status(403).json({ message: '无权访问' });
       }
     } else if (payload.role === 'server_admin') {
-      const match = path.match(/^\/api\/server\/([^/]+)/);
-      if (!match || payload.serverId !== match[1]) {
+      const legacyMatch = path.match(/^\/api\/server\/([^/]+)/);
+      const spaceMatch = path.match(/^\/api\/spaces\/([^/]+)\/([^/]+)/);
+      const legacyAllowed = legacyMatch && payload.serverId === legacyMatch[1];
+      const space = spaceMatch ? db.getSpace(spaceMatch[1], spaceMatch[2]) : undefined;
+      const canonicalAllowed = !!space && payload.serverId === space.serverId;
+      if (!legacyAllowed && !canonicalAllowed) {
         return res.status(403).json({ message: '无权访问此服务器' });
+      }
+    } else if (payload.role === 'space_admin') {
+      const legacyMatch = path.match(/^\/api\/server\/([^/]+)/);
+      const spaceMatch = path.match(/^\/api\/spaces\/([^/]+)\/([^/]+)/);
+      const legacyAllowed =
+        payload.platform === 'kook' &&
+        legacyMatch &&
+        payload.externalId === legacyMatch[1];
+      const canonicalAllowed =
+        spaceMatch &&
+        payload.platform === spaceMatch[1] &&
+        payload.externalId === spaceMatch[2];
+      if (!legacyAllowed && !canonicalAllowed) {
+        return res.status(403).json({ message: '无权访问此平台空间' });
       }
     }
 

@@ -1,14 +1,29 @@
 import { useEffect, useState } from 'react';
-import { Settings, Server, LogOut, ShieldCheck, ExternalLink, Trash2, Plus, X } from 'lucide-react';
+import {
+  Bell,
+  ChevronDown,
+  ChevronUp,
+  Edit3,
+  ExternalLink,
+  LogOut,
+  Plus,
+  RefreshCw,
+  Server,
+  Settings,
+  ShieldCheck,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { api, getSuperAdminToken, clearSuperAdminToken } from '../lib/api';
 import { cn } from '../lib/utils';
 
-type Tab = 'config' | 'servers';
+type Tab = 'config' | 'kook' | 'notices';
 type ServerDetailTab = 'events' | 'sessions';
 
 const TABS: { id: Tab; label: string; icon: typeof Settings }[] = [
   { id: 'config', label: '全局配置', icon: Settings },
-  { id: 'servers', label: '服务器列表', icon: Server },
+  { id: 'kook', label: 'KOOK 服务器', icon: Server },
+  { id: 'notices', label: '通知管理', icon: Bell },
 ];
 
 export default function SuperAdminPage() {
@@ -109,12 +124,13 @@ export default function SuperAdminPage() {
         </div>
 
         {tab === 'config' && <GlobalConfigPanel />}
-        {tab === 'servers' && !selectedServerId && (
+        {tab === 'kook' && !selectedServerId && (
           <ServerListPanel onSelectServer={handleServerSelect} />
         )}
-        {tab === 'servers' && selectedServerId && (
+        {tab === 'kook' && selectedServerId && (
           <ServerDetailPanel serverId={selectedServerId} onBack={handleBackToList} />
         )}
+        {tab === 'notices' && <NoticeManagementPanel />}
       </main>
     </div>
   );
@@ -385,6 +401,373 @@ function GlobalConfigPanel() {
   );
 }
 
+// ===== Notice Management Panel =====
+
+type NoticeTarget = 'server_admin' | 'share' | 'view';
+
+interface NoticeFormValue {
+  id?: string;
+  kind: 'banner' | 'modal';
+  modalPolicy: 'dismissible' | 'acknowledgement_required';
+  title: string;
+  contentFormat: 'text' | 'html';
+  content: string;
+  imageUrl: string;
+  enabled: boolean;
+  sortOrder: number;
+  repeatAfterSec: number | null;
+  targets: NoticeTarget[];
+}
+
+const NOTICE_TARGET_LABELS: Record<NoticeTarget, string> = {
+  server_admin: '管理页',
+  share: '分享页',
+  view: '观看页',
+};
+
+function emptyNotice(sortOrder: number): NoticeFormValue {
+  return {
+    kind: 'banner',
+    modalPolicy: 'dismissible',
+    title: '',
+    contentFormat: 'text',
+    content: '',
+    imageUrl: '',
+    enabled: true,
+    sortOrder,
+    repeatAfterSec: 7 * 24 * 60 * 60,
+    targets: ['view'],
+  };
+}
+
+function NoticeManagementPanel() {
+  const [notices, setNotices] = useState<any[]>([]);
+  const [editing, setEditing] = useState<NoticeFormValue | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    api.getSuperNotices()
+      .then(setNotices)
+      .catch((e) => alert(e.message || '通知加载失败'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const startEdit = (notice: any) => {
+    setEditing({
+      id: notice.id,
+      kind: notice.kind,
+      modalPolicy: notice.modalPolicy || 'dismissible',
+      title: notice.title || '',
+      contentFormat: notice.contentFormat,
+      content: notice.content || '',
+      imageUrl: notice.imageUrl || '',
+      enabled: !!notice.enabled,
+      sortOrder: notice.sortOrder,
+      repeatAfterSec: notice.repeatAfterSec ?? null,
+      targets: [...notice.targets],
+    });
+  };
+
+  const save = async () => {
+    if (!editing) return;
+    if (editing.targets.length === 0) {
+      alert('至少选择一个投放页面');
+      return;
+    }
+    if (!editing.content.trim() && !editing.imageUrl.trim()) {
+      alert('通知正文和图片不能同时为空');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        ...editing,
+        modalPolicy: editing.kind === 'modal' ? editing.modalPolicy : null,
+      };
+      if (editing.id) {
+        await api.updateSuperNotice(editing.id, payload);
+      } else {
+        await api.createSuperNotice(payload);
+      }
+      setEditing(null);
+      load();
+    } catch (e: any) {
+      alert(e.message || '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const move = async (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= notices.length) return;
+    const next = [...notices];
+    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+    setNotices(next);
+    try {
+      await api.reorderSuperNotices(next.map(notice => notice.id));
+    } catch (e: any) {
+      alert(e.message || '排序失败');
+      load();
+    }
+  };
+
+  if (loading) return <div className="text-muted text-sm">加载中...</div>;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-muted">
+            管理横幅和强提醒；旧 KOOK 地址迁移页不受这里控制。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setEditing(emptyNotice(notices.length))}
+          className="btn-brand px-4 py-2 rounded-xl text-sm inline-flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          新建通知
+        </button>
+      </div>
+
+      {editing && (
+        <div className="glass rounded-2xl p-5 border border-brand/20 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold">{editing.id ? '编辑通知' : '新建通知'}</h3>
+            <button onClick={() => setEditing(null)} className="p-1.5 text-dim hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="text-xs text-muted">
+              通知类型
+              <select
+                value={editing.kind}
+                onChange={(e) => setEditing({ ...editing, kind: e.target.value as NoticeFormValue['kind'] })}
+                className="mt-1 w-full bg-surface-dark border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white"
+              >
+                <option value="banner">横幅</option>
+                <option value="modal">强提醒</option>
+              </select>
+            </label>
+            {editing.kind === 'modal' && (
+              <label className="text-xs text-muted">
+                关闭策略
+                <select
+                  value={editing.modalPolicy}
+                  onChange={(e) => setEditing({
+                    ...editing,
+                    modalPolicy: e.target.value as NoticeFormValue['modalPolicy'],
+                  })}
+                  className="mt-1 w-full bg-surface-dark border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white"
+                >
+                  <option value="dismissible">普通提醒（可关闭）</option>
+                  <option value="acknowledgement_required">必须确认（仅确认按钮）</option>
+                </select>
+              </label>
+            )}
+            <label className="text-xs text-muted">
+              标题（可选）
+              <input
+                value={editing.title}
+                onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+                className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white"
+              />
+            </label>
+            <label className="text-xs text-muted">
+              内容格式
+              <select
+                value={editing.contentFormat}
+                onChange={(e) => setEditing({
+                  ...editing,
+                  contentFormat: e.target.value as NoticeFormValue['contentFormat'],
+                })}
+                className="mt-1 w-full bg-surface-dark border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white"
+              >
+                <option value="text">纯文本</option>
+                <option value="html">安全 HTML</option>
+              </select>
+            </label>
+          </div>
+
+          <label className="text-xs text-muted block">
+            通知正文
+            <textarea
+              rows={editing.contentFormat === 'html' ? 8 : 4}
+              value={editing.content}
+              onChange={(e) => setEditing({ ...editing, content: e.target.value })}
+              placeholder={editing.contentFormat === 'html' ? '<p>通知内容</p>' : '通知内容'}
+              className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white font-mono"
+            />
+          </label>
+
+          <label className="text-xs text-muted block">
+            图片 URL（可选，仅 HTTP/HTTPS）
+            <input
+              value={editing.imageUrl}
+              onChange={(e) => setEditing({ ...editing, imageUrl: e.target.value })}
+              placeholder="https://..."
+              className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white"
+            />
+          </label>
+
+          <div>
+            <p className="text-xs text-muted mb-2">投放页面</p>
+            <div className="flex flex-wrap gap-4">
+              {(Object.keys(NOTICE_TARGET_LABELS) as NoticeTarget[]).map(target => (
+                <label key={target} className="inline-flex items-center gap-2 text-sm text-muted">
+                  <input
+                    type="checkbox"
+                    checked={editing.targets.includes(target)}
+                    onChange={(e) => setEditing({
+                      ...editing,
+                      targets: e.target.checked
+                        ? [...editing.targets, target]
+                        : editing.targets.filter(item => item !== target),
+                    })}
+                  />
+                  {NOTICE_TARGET_LABELS[target]}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="text-xs text-muted">
+              关闭后再次提醒
+              <select
+                value={editing.repeatAfterSec === null ? 'never' : String(editing.repeatAfterSec)}
+                onChange={(e) => setEditing({
+                  ...editing,
+                  repeatAfterSec: e.target.value === 'never' ? null : Number(e.target.value),
+                })}
+                className="mt-1 w-full bg-surface-dark border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white"
+              >
+                <option value="0">每次重新进入</option>
+                <option value="86400">1 天</option>
+                <option value="259200">3 天</option>
+                <option value="604800">7 天</option>
+                <option value="2592000">30 天</option>
+                <option value="never">内容更新前不再提醒</option>
+              </select>
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm text-muted self-end pb-3">
+              <input
+                type="checkbox"
+                checked={editing.enabled}
+                onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })}
+              />
+              启用通知
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setEditing(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-white/5">
+              取消
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn-brand px-5 py-2 rounded-lg text-sm disabled:opacity-40"
+            >
+              {saving ? '保存中...' : '保存通知'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {notices.length === 0 ? (
+        <div className="glass rounded-2xl p-8 text-center text-muted">暂无通知</div>
+      ) : (
+        <div className="space-y-3">
+          {notices.map((notice, index) => (
+            <div key={notice.id} className="glass rounded-2xl p-5">
+              <div className="flex items-start gap-4">
+                <div className="flex flex-col gap-1">
+                  <button
+                    onClick={() => move(index, -1)}
+                    disabled={index === 0}
+                    className="p-1 rounded text-dim hover:text-white disabled:opacity-20"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => move(index, 1)}
+                    disabled={index === notices.length - 1}
+                    className="p-1 rounded text-dim hover:text-white disabled:opacity-20"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold">{notice.title || '无标题通知'}</h3>
+                    <span className="px-2 py-0.5 rounded bg-brand/15 text-brand-light text-xs">
+                      {notice.kind === 'banner' ? '横幅' : notice.modalPolicy === 'acknowledgement_required' ? '必须确认' : '普通强提醒'}
+                    </span>
+                    <span className={cn(
+                      'px-2 py-0.5 rounded text-xs',
+                      notice.enabled ? 'bg-green-500/15 text-green-300' : 'bg-white/10 text-dim',
+                    )}>
+                      {notice.enabled ? '启用' : '停用'}
+                    </span>
+                    <span className="text-xs text-dim">版本 {notice.revision}</span>
+                  </div>
+                  <p className="text-sm text-muted mt-2 line-clamp-2">
+                    {notice.contentFormat === 'html'
+                      ? notice.content.replace(/<[^>]*>/g, ' ')
+                      : notice.content}
+                  </p>
+                  <p className="text-xs text-dim mt-2">
+                    页面：{notice.targets.map((target: NoticeTarget) => NOTICE_TARGET_LABELS[target]).join('、')}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={async () => {
+                      await api.republishSuperNotice(notice.id);
+                      load();
+                    }}
+                    title="重新推送"
+                    className="p-2 rounded-lg text-muted hover:text-white hover:bg-white/5"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => startEdit(notice)}
+                    title="编辑"
+                    className="p-2 rounded-lg text-muted hover:text-white hover:bg-white/5"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm(`确定删除通知“${notice.title || '无标题通知'}”吗？`)) return;
+                      await api.deleteSuperNotice(notice.id);
+                      load();
+                    }}
+                    title="删除"
+                    className="p-2 rounded-lg text-red-300 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ===== Server List Panel =====
 
 function ServerListPanel({ onSelectServer }: { onSelectServer: (serverId: string) => void }) {
@@ -393,7 +776,7 @@ function ServerListPanel({ onSelectServer }: { onSelectServer: (serverId: string
 
   const loadServers = () => {
     setLoading(true);
-    api.getSuperServers()
+    api.getSuperSpaces('kook')
       .then(setServers)
       .finally(() => setLoading(false));
   };
@@ -454,7 +837,7 @@ function ServerListPanel({ onSelectServer }: { onSelectServer: (serverId: string
                 </span>
                 <div className="flex items-center gap-1">
                   <a
-                    href={`/${s.serverId}`}
+                    href={`/kook/${s.externalId || s.serverId}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
@@ -485,9 +868,9 @@ function ServerDetailPanel({ serverId, onBack }: { serverId: string; onBack: () 
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      api.getSuperServer(serverId),
-      api.getSuperServerEvents(serverId),
-      api.getSuperServerSessions(serverId),
+      api.getSuperSpace('kook', serverId),
+      api.getSuperSpaceEvents('kook', serverId),
+      api.getSuperSpaceSessions('kook', serverId),
     ])
       .then(([serverData, eventsData, sessionsData]) => {
         setServer(serverData);
@@ -547,7 +930,7 @@ function ServerDetailPanel({ serverId, onBack }: { serverId: string; onBack: () 
               {server.status === 'kicked' ? '已踢出' : server.bound ? '已绑定' : '未绑定'}
             </span>
             <a
-              href={`/${server.serverId}`}
+              href={`/kook/${server.externalId || server.serverId}`}
               target="_blank"
               rel="noopener noreferrer"
               className="px-3 py-1.5 rounded-lg text-sm text-center bg-white/5 text-muted hover:text-white hover:bg-white/10 transition-colors"
@@ -564,7 +947,7 @@ function ServerDetailPanel({ serverId, onBack }: { serverId: string; onBack: () 
                 if (!confirmed) return;
                 setDeleting(true);
                 try {
-                  await api.deleteSuperServer(serverId);
+                  await api.deleteSuperSpace('kook', serverId);
                   onBack();
                 } catch (e: any) {
                   alert(e.message || '删除失败');

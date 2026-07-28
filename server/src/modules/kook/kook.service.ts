@@ -183,7 +183,7 @@ export class KookService implements OnModuleInit {
         if (textChannel) {
           const globalCfg = this.db.getGlobalConfig();
           const bindToken = this.db.generateBindToken(guildId);
-          const bindUrl = `${globalCfg.publicDomain}/${guildId}?t=${bindToken}`;
+          const bindUrl = `${globalCfg.publicDomain}/kook/${guildId}?t=${bindToken}`;
           this.logger.log(`[CARD] Sending temp bind card to owner ${ownerId} in channel ${textChannel.id}...`);
           const card = buildBindCard({
             guildName,
@@ -383,7 +383,7 @@ export class KookService implements OnModuleInit {
     if (server.bound) {
       const globalCfg = this.db.getGlobalConfig();
       const domain = globalCfg.publicDomain;
-      const manageUrl = `${domain}/${guildId}`;
+      const manageUrl = `${domain}/kook/${guildId}`;
       const card = buildAlreadyBoundCard({
         guildName: server.guildName,
         manageUrl,
@@ -401,7 +401,7 @@ export class KookService implements OnModuleInit {
     // 未绑定：生成临时 token 并发送绑定卡片
     const bindToken = this.db.generateBindToken(guildId);
     const globalCfg = this.db.getGlobalConfig();
-    const bindUrl = `${globalCfg.publicDomain}/${guildId}?t=${bindToken}`;
+    const bindUrl = `${globalCfg.publicDomain}/kook/${guildId}?t=${bindToken}`;
     const card = buildBindRequestCard({
       guildName: server.guildName,
       openId: server.openId || undefined,

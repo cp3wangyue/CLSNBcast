@@ -1,6 +1,6 @@
 # Runtime image assembled on the server from locally built dist artifacts.
 # Application source and frontend toolchains are intentionally not built here.
-FROM node:20.18-alpine
+FROM node:20.19-alpine
 
 WORKDIR /app
 ENV NODE_ENV=production

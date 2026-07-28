@@ -6,6 +6,7 @@ import { useSessionSSE } from '../hooks/useSessionSSE';
 import { useScreenShare, QUALITY_OPTIONS } from '../hooks/useScreenShare';
 import { copyToClipboard, cn } from '../lib/utils';
 import type { SessionInfo } from '../types';
+import { NoticeBanners } from '../components/notices/NoticeCenter';
 
 // ===== Cookie 工具 =====
 const CID_KEY = 'xgoatcast_cid';
@@ -223,6 +224,10 @@ export default function SharePage() {
           <span className="text-muted">{socket.connected ? '已连接' : '连接中'}</span>
         </div>
       </header>
+
+      <div className="max-w-3xl mx-auto">
+        <NoticeBanners />
+      </div>
 
       <main className="max-w-3xl mx-auto space-y-5">
         {/* 分享者信息 + 观看链接 */}

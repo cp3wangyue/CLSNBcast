@@ -20,45 +20,57 @@ import {
   BindServerDto,
 } from './server-admin.dto';
 
-@Controller('api/server')
+@Controller('api')
 export class ServerAdminController {
   private readonly tokenTtlSec = 7 * 24 * 3600;
 
   constructor(private readonly db: DatabaseService) {}
 
+  private resolveSpace(params: Record<string, string>) {
+    const platform = params.platform || 'kook';
+    const externalId = params.externalId || params.serverId || '';
+    return {
+      platform,
+      externalId,
+      server: this.db.getSpace(platform, externalId),
+    };
+  }
+
   // ===== Auth =====
 
   /** Bind server: set password for the first time (called from KOOK card button) */
-  @Post(':serverId/bind')
+  @Post(['server/:serverId/bind', 'spaces/:platform/:externalId/bind'])
   @HttpCode(HttpStatus.OK)
-  bindServer(@Param('serverId') serverId: string, @Body() dto: BindServerDto) {
-    const server = this.db.getServer(serverId);
+  bindServer(@Param() params: Record<string, string>, @Body() dto: BindServerDto) {
+    const { server } = this.resolveSpace(params);
     if (!server) return { ok: false, message: '服务器不存在' };
     if (server.bound) return { ok: false, message: '服务器已绑定' };
 
     // 校验绑定 token（未绑定时必须提供有效 token）
-    if (!dto.token || !this.db.validateBindToken(serverId, dto.token)) {
+    if (!dto.token || !this.db.validateBindToken(server.serverId, dto.token)) {
       return { ok: false, message: '绑定链接无效或已过期，请在 KOOK 服务器内重新发送 /xchelp 命令' };
     }
 
     const passwordHash = bcrypt.hashSync(dto.password, 10);
-    this.db.updateServer(serverId, {
+    this.db.updateServer(server.serverId, {
       passwordHash,
       bound: 1,
       reboundAt: Date.now(),
     });
     // 绑定成功后清空 token
-    this.db.clearBindToken(serverId);
+    this.db.clearBindToken(server.serverId);
     return { ok: true, message: '绑定成功' };
   }
 
   /** Check if server is bound (for KOOK card flow) */
-  @Get(':serverId/status')
-  getServerStatus(@Param('serverId') serverId: string, @Query('token') token?: string) {
-    const server = this.db.getServer(serverId);
+  @Get(['server/:serverId/status', 'spaces/:platform/:externalId/status'])
+  getServerStatus(@Param() params: Record<string, string>, @Query('token') token?: string) {
+    const { platform, externalId, server } = this.resolveSpace(params);
     if (!server) return { exists: false };
     const result: any = {
       exists: true,
+      platform,
+      externalId,
       bound: !!server.bound,
       guildName: server.guildName,
       openId: server.openId,
@@ -68,17 +80,17 @@ export class ServerAdminController {
       if (!token) {
         result.tokenValid = false;
       } else {
-        result.tokenValid = this.db.validateBindToken(serverId, token);
+        result.tokenValid = this.db.validateBindToken(server.serverId, token);
       }
     }
     return result;
   }
 
   /** Login to server admin panel */
-  @Post(':serverId/login')
+  @Post(['server/:serverId/login', 'spaces/:platform/:externalId/login'])
   @HttpCode(HttpStatus.OK)
-  login(@Param('serverId') serverId: string, @Body() dto: ServerAdminLoginDto) {
-    const server = this.db.getServer(serverId);
+  login(@Param() params: Record<string, string>, @Body() dto: ServerAdminLoginDto) {
+    const { platform, externalId, server } = this.resolveSpace(params);
     if (!server) return { ok: false, message: '服务器不存在' };
     if (!server.bound) return { ok: false, message: '服务器尚未绑定' };
 
@@ -87,8 +99,10 @@ export class ServerAdminController {
     }
 
     const payload = {
-      role: 'server_admin',
-      serverId,
+      role: 'space_admin',
+      spaceId: server.serverId,
+      platform,
+      externalId,
       exp: Math.floor(Date.now() / 1000) + this.tokenTtlSec,
     };
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -100,13 +114,16 @@ export class ServerAdminController {
 
   // ===== Server Config =====
 
-  @Get(':serverId/config')
-  getConfig(@Param('serverId') serverId: string) {
-    const server = this.db.getServer(serverId);
+  @Get(['server/:serverId/config', 'spaces/:platform/:externalId/config'])
+  getConfig(@Param() params: Record<string, string>) {
+    const { platform, externalId, server } = this.resolveSpace(params);
     if (!server) return { ok: false, message: '服务器不存在' };
 
     return {
-      serverId: server.serverId,
+      spaceId: server.serverId,
+      serverId: externalId,
+      platform,
+      externalId,
       guildName: server.guildName,
       agoraAppId: server.agoraAppId,
       agoraAppCertificate: server.agoraAppCertificate ? '******' : '',
@@ -122,9 +139,9 @@ export class ServerAdminController {
     };
   }
 
-  @Put(':serverId/config')
-  updateConfig(@Param('serverId') serverId: string, @Body() dto: UpdateServerConfigDto) {
-    const server = this.db.getServer(serverId);
+  @Put(['server/:serverId/config', 'spaces/:platform/:externalId/config'])
+  updateConfig(@Param() params: Record<string, string>, @Body() dto: UpdateServerConfigDto) {
+    const { server } = this.resolveSpace(params);
     if (!server) return { ok: false, message: '服务器不存在' };
 
     const updates: any = {};
@@ -150,16 +167,16 @@ export class ServerAdminController {
     if (dto.noViewerTimeoutSec !== undefined) updates.noViewerTimeoutSec = dto.noViewerTimeoutSec;
     if (dto.allowLowLatency !== undefined) updates.allowLowLatency = dto.allowLowLatency;
 
-    this.db.updateServer(serverId, updates);
+    this.db.updateServer(server.serverId, updates);
     return { ok: true };
   }
 
   // ===== Sessions =====
 
-  @Get(':serverId/sessions')
-  listSessions(@Param('serverId') serverId: string) {
-    const server = this.db.getServer(serverId);
+  @Get(['server/:serverId/sessions', 'spaces/:platform/:externalId/sessions'])
+  listSessions(@Param() params: Record<string, string>) {
+    const { server } = this.resolveSpace(params);
     if (!server) return [];
-    return this.db.getSessionsByServerFiltered(serverId, server.reboundAt);
+    return this.db.getSessionsByServerFiltered(server.serverId, server.reboundAt);
   }
 }

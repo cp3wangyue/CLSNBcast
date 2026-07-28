@@ -4,6 +4,7 @@ import type {
 } from '../types';
 
 const SUPER_TOKEN_KEY = 'xgoat_super_token';
+export type Platform = 'kook' | 'qq' | 'discord';
 
 export function getSuperAdminToken(): string | null {
   return localStorage.getItem(SUPER_TOKEN_KEY);
@@ -23,6 +24,30 @@ export function setServerAdminToken(serverId: string, token: string): void {
 
 export function clearServerAdminToken(serverId: string): void {
   localStorage.removeItem(`xgoat_server_${serverId}`);
+}
+
+function getSpaceAdminTokenKey(platform: Platform, externalId: string): string {
+  return `xgoat_space_${platform}_${externalId}`;
+}
+
+export function getSpaceAdminToken(platform: Platform, externalId: string): string | null {
+  const token = localStorage.getItem(getSpaceAdminTokenKey(platform, externalId));
+  if (token) return token;
+  if (platform !== 'kook') return null;
+  const legacy = getServerAdminToken(externalId);
+  if (legacy) {
+    localStorage.setItem(getSpaceAdminTokenKey(platform, externalId), legacy);
+  }
+  return legacy;
+}
+
+export function setSpaceAdminToken(platform: Platform, externalId: string, token: string): void {
+  localStorage.setItem(getSpaceAdminTokenKey(platform, externalId), token);
+}
+
+export function clearSpaceAdminToken(platform: Platform, externalId: string): void {
+  localStorage.removeItem(getSpaceAdminTokenKey(platform, externalId));
+  if (platform === 'kook') clearServerAdminToken(externalId);
 }
 
 export class ApiError extends Error {
@@ -131,6 +156,36 @@ async function serverRequest<T>(
   return res.json() as Promise<T>;
 }
 
+async function spaceRequest<T>(
+  platform: Platform,
+  externalId: string,
+  url: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+  const token = getSpaceAdminToken(platform, externalId);
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) {
+    let serverMsg = '';
+    try {
+      const data = await res.json();
+      serverMsg = data?.message || '';
+    } catch {
+      serverMsg = res.statusText;
+    }
+    throw new ApiError(res.status, serverMsg);
+  }
+  return res.json() as Promise<T>;
+}
+
+function spaceApiBase(platform: Platform, externalId: string): string {
+  return `/api/spaces/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}`;
+}
+
 export const api = {
   // ===== Share API =====
   getShareInfo(token: string): Promise<SessionInfo> {
@@ -166,6 +221,13 @@ export const api = {
     });
   },
 
+  getNotices(page: 'server_admin' | 'share' | 'view'): Promise<any[]> {
+    return request('/api/notices?page=' + encodeURIComponent(page));
+  },
+  getAdminMigration(): Promise<{ legacyAdminSunsetAt: number; canonicalPlatform: string }> {
+    return request('/api/meta/admin-migration');
+  },
+
   // ===== Super Admin API =====
   superLogin(password: string): Promise<{ ok: boolean; token?: string; message?: string }> {
     return superRequest('/api/super/login', {
@@ -184,6 +246,62 @@ export const api = {
   },
   getSuperServers(): Promise<any[]> {
     return superRequest('/api/super/servers');
+  },
+  getSuperSpaces(platform?: Platform): Promise<any[]> {
+    const qs = platform ? `?platform=${encodeURIComponent(platform)}` : '';
+    return superRequest('/api/super/spaces' + qs);
+  },
+  getSuperSpace(platform: Platform, externalId: string): Promise<any> {
+    return superRequest(`/api/super/spaces/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}`);
+  },
+  getSuperSpaceEvents(platform: Platform, externalId: string): Promise<any[]> {
+    return superRequest(`/api/super/spaces/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}/events`);
+  },
+  getSuperSpaceSessions(platform: Platform, externalId: string): Promise<any[]> {
+    return superRequest(`/api/super/spaces/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}/sessions`);
+  },
+  updateSuperSpace(platform: Platform, externalId: string, config: any): Promise<{ ok: boolean }> {
+    return superRequest(`/api/super/spaces/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    });
+  },
+  deleteSuperSpace(platform: Platform, externalId: string): Promise<{ ok: boolean }> {
+    return superRequest(`/api/super/spaces/${encodeURIComponent(platform)}/${encodeURIComponent(externalId)}`, {
+      method: 'DELETE',
+    });
+  },
+  getSuperNotices(): Promise<any[]> {
+    return superRequest('/api/super/notices');
+  },
+  createSuperNotice(notice: any): Promise<any> {
+    return superRequest('/api/super/notices', {
+      method: 'POST',
+      body: JSON.stringify(notice),
+    });
+  },
+  updateSuperNotice(id: string, notice: any): Promise<any> {
+    return superRequest('/api/super/notices/' + encodeURIComponent(id), {
+      method: 'PUT',
+      body: JSON.stringify(notice),
+    });
+  },
+  deleteSuperNotice(id: string): Promise<{ ok: boolean }> {
+    return superRequest('/api/super/notices/' + encodeURIComponent(id), {
+      method: 'DELETE',
+    });
+  },
+  reorderSuperNotices(ids: string[]): Promise<{ ok: boolean }> {
+    return superRequest('/api/super/notices/order', {
+      method: 'PUT',
+      body: JSON.stringify({ ids }),
+    });
+  },
+  republishSuperNotice(id: string): Promise<any> {
+    return superRequest('/api/super/notices/' + encodeURIComponent(id) + '/republish', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
   },
   getSuperServer(serverId: string): Promise<any> {
     return superRequest('/api/super/servers/' + serverId);
@@ -235,5 +353,48 @@ export const api = {
   },
   getServerSessions(serverId: string): Promise<any[]> {
     return serverRequest(serverId, `/api/server/${serverId}/sessions`);
+  },
+
+  // ===== Canonical Platform Space Admin API =====
+  getSpaceStatus(
+    platform: Platform,
+    externalId: string,
+    token?: string,
+  ): Promise<{ exists: boolean; bound?: boolean; guildName?: string; openId?: string; tokenValid?: boolean }> {
+    const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+    return spaceRequest(platform, externalId, spaceApiBase(platform, externalId) + `/status${qs}`);
+  },
+  bindSpace(
+    platform: Platform,
+    externalId: string,
+    password: string,
+    token?: string,
+  ): Promise<{ ok: boolean; message?: string }> {
+    return spaceRequest(platform, externalId, spaceApiBase(platform, externalId) + '/bind', {
+      method: 'POST',
+      body: JSON.stringify({ password, token }),
+    });
+  },
+  spaceAdminLogin(
+    platform: Platform,
+    externalId: string,
+    password: string,
+  ): Promise<{ ok: boolean; token?: string; message?: string }> {
+    return spaceRequest(platform, externalId, spaceApiBase(platform, externalId) + '/login', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
+  },
+  getSpaceConfig(platform: Platform, externalId: string): Promise<any> {
+    return spaceRequest(platform, externalId, spaceApiBase(platform, externalId) + '/config');
+  },
+  updateSpaceConfig(platform: Platform, externalId: string, config: any): Promise<{ ok: boolean }> {
+    return spaceRequest(platform, externalId, spaceApiBase(platform, externalId) + '/config', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    });
+  },
+  getSpaceSessions(platform: Platform, externalId: string): Promise<any[]> {
+    return spaceRequest(platform, externalId, spaceApiBase(platform, externalId) + '/sessions');
   },
 };

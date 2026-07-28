@@ -1,9 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Settings, ListChecks, LogOut, ShieldCheck, ExternalLink } from 'lucide-react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { api, getServerAdminToken, setServerAdminToken, clearServerAdminToken } from '../lib/api';
+import {
+  api,
+  clearSpaceAdminToken,
+  getSpaceAdminToken,
+  setSpaceAdminToken,
+} from '../lib/api';
 import { cn } from '../lib/utils';
 import { QUALITY_OPTIONS } from '../hooks/useScreenShare';
+import { NoticeBanners, NoticeProvider } from '../components/notices/NoticeCenter';
+
+const PLATFORM = 'kook' as const;
 
 type Tab = 'config' | 'sessions';
 
@@ -24,7 +32,7 @@ export default function ServerAdminPage() {
   useEffect(() => {
     if (!serverId) return;
     // Check if server exists and get status (pass bind token if present)
-    api.getServerStatus(serverId, bindToken || undefined)
+    api.getSpaceStatus(PLATFORM, serverId, bindToken || undefined)
       .then((info) => {
         setServerInfo(info);
         if (!info.exists) {
@@ -36,15 +44,15 @@ export default function ServerAdminPage() {
           return;
         }
         // Check if we have a valid token for this server
-        const adminToken = getServerAdminToken(serverId);
+        const adminToken = getSpaceAdminToken(PLATFORM, serverId);
         if (adminToken) {
-          api.getServerConfig(serverId)
+          api.getSpaceConfig(PLATFORM, serverId)
             .then(() => {
               setAuthed(true);
               setChecking(false);
             })
             .catch(() => {
-              clearServerAdminToken(serverId);
+              clearSpaceAdminToken(PLATFORM, serverId);
               setChecking(false);
             });
         } else {
@@ -86,11 +94,12 @@ export default function ServerAdminPage() {
   }
 
   const handleLogout = () => {
-    clearServerAdminToken(serverId!);
+    clearSpaceAdminToken(PLATFORM, serverId!);
     setAuthed(false);
   };
 
   return (
+    <NoticeProvider page="server_admin">
     <div className="min-h-screen flex">
       <aside className="fixed left-0 top-0 bottom-0 w-60 glass-strong flex flex-col py-6 px-4 z-10">
         <div className="flex items-center gap-3 px-2 mb-8">
@@ -135,6 +144,7 @@ export default function ServerAdminPage() {
       </aside>
 
       <main className="flex-1 ml-60 p-8">
+        <NoticeBanners />
         <div className="mb-6">
           <h1 className="text-2xl font-bold gradient-text">
             {TABS.find((t) => t.id === tab)?.label}
@@ -145,6 +155,7 @@ export default function ServerAdminPage() {
         {tab === 'sessions' && <ServerSessionPanel serverId={serverId!} />}
       </main>
     </div>
+    </NoticeProvider>
   );
 }
 
@@ -194,7 +205,7 @@ function BindPage({ serverId, guildName, bindToken, onBind }: { serverId: string
     setLoading(true);
     setError('');
     try {
-      const res = await api.bindServer(serverId, password, bindToken);
+      const res = await api.bindSpace(PLATFORM, serverId, password, bindToken);
       if (res.ok) {
         onBind();
       } else {
@@ -265,9 +276,9 @@ function ServerLoginForm({ serverId, onSuccess }: { serverId: string; onSuccess:
     setLoading(true);
     setError('');
     try {
-      const res = await api.serverAdminLogin(serverId, password);
+      const res = await api.spaceAdminLogin(PLATFORM, serverId, password);
       if (res.ok && res.token) {
-        setServerAdminToken(serverId, res.token);
+        setSpaceAdminToken(PLATFORM, serverId, res.token);
         onSuccess();
       } else {
         setError(res.message || '登录失败');
@@ -321,7 +332,7 @@ function ServerConfigPanel({ serverId }: { serverId: string }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api.getServerConfig(serverId).then(setConfig).catch((e) => setError(e.message));
+    api.getSpaceConfig(PLATFORM, serverId).then(setConfig).catch((e) => setError(e.message));
   }, [serverId]);
 
   const update = (path: string[], value: unknown) => {
@@ -340,7 +351,7 @@ function ServerConfigPanel({ serverId }: { serverId: string }) {
     setSaving(true);
     setError('');
     try {
-      await api.updateServerConfig(serverId, config);
+      await api.updateSpaceConfig(PLATFORM, serverId, config);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e: any) {
@@ -508,7 +519,7 @@ function ServerSessionPanel({ serverId }: { serverId: string }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.getServerSessions(serverId)
+    api.getSpaceSessions(PLATFORM, serverId)
       .then(setSessions)
       .finally(() => setLoading(false));
   }, [serverId]);

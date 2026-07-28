@@ -12,10 +12,13 @@ export interface GlobalConfig {
   publicDomain: string;
   triggerWordLabels: string[];
   qualityBitrates: QualityBitrateConfig;
+  legacyAdminSunsetAt: number;
 }
 
 export interface ServerRecord {
-  serverId: string;       // guild_id 雪花 ID（不变，用于主键和 URL）
+  serverId: string;       // 兼容字段：内部 spaceId，现有 KOOK 数据仍等于 guild_id
+  platform: string;       // 'kook'，未来可扩展 'qq' | 'discord'
+  externalId: string;     // 平台外部 ID；KOOK 为 guild_id 雪花 ID
   openId: string;         // open_id 公开 ID（用于面板显示）
   guildName: string;
   ownerId: string;
@@ -39,6 +42,41 @@ export interface ServerRecord {
   serverSecret: string;   // 每服务器独立的 HMAC 签名密钥
   createdAt: number;
   updatedAt: number;
+}
+
+export type NoticeKind = 'banner' | 'modal';
+export type NoticeModalPolicy = 'dismissible' | 'acknowledgement_required';
+export type NoticeContentFormat = 'text' | 'html';
+export type NoticeTargetPage = 'server_admin' | 'share' | 'view';
+
+export interface NoticeRecord {
+  id: string;
+  kind: NoticeKind;
+  modalPolicy: NoticeModalPolicy | null;
+  title: string;
+  contentFormat: NoticeContentFormat;
+  content: string;
+  imageUrl: string;
+  enabled: number;
+  sortOrder: number;
+  repeatAfterSec: number | null;
+  revision: number;
+  targets: NoticeTargetPage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface NoticeWriteInput {
+  kind: NoticeKind;
+  modalPolicy?: NoticeModalPolicy | null;
+  title?: string;
+  contentFormat: NoticeContentFormat;
+  content: string;
+  imageUrl?: string;
+  enabled: boolean;
+  sortOrder: number;
+  repeatAfterSec?: number | null;
+  targets: NoticeTargetPage[];
 }
 
 export interface ServerEvent {
@@ -117,6 +155,8 @@ export class DatabaseService implements OnModuleDestroy {
 
       CREATE TABLE IF NOT EXISTS servers (
         server_id              TEXT PRIMARY KEY,  -- guild_id 雪花 ID（不变，用于主键和 URL）
+        platform               TEXT NOT NULL DEFAULT 'kook',
+        external_id            TEXT NOT NULL DEFAULT '',
         open_id                TEXT NOT NULL DEFAULT '',  -- open_id 公开 ID（用于面板显示）
         guild_name             TEXT NOT NULL DEFAULT '',
         owner_id               TEXT NOT NULL DEFAULT '',
@@ -167,6 +207,26 @@ export class DatabaseService implements OnModuleDestroy {
       this.db.exec(`ALTER TABLE servers ADD COLUMN allow_low_latency INTEGER NOT NULL DEFAULT 0`);
       this.logger.log('Added allow_low_latency column to servers table');
     }
+    if (!columns.some(c => c.name === 'platform')) {
+      this.db.exec(`ALTER TABLE servers ADD COLUMN platform TEXT NOT NULL DEFAULT 'kook'`);
+      this.logger.log('Added platform column to servers table');
+    }
+    if (!columns.some(c => c.name === 'external_id')) {
+      this.db.exec(`ALTER TABLE servers ADD COLUMN external_id TEXT NOT NULL DEFAULT ''`);
+      this.logger.log('Added external_id column to servers table');
+    }
+    this.db.exec(`
+      UPDATE servers
+      SET platform = 'kook'
+      WHERE platform IS NULL OR platform = '';
+
+      UPDATE servers
+      SET external_id = server_id
+      WHERE external_id IS NULL OR external_id = '';
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_servers_platform_external_id
+      ON servers(platform, external_id);
+    `);
 
     // Migrate servers table: add rebound_at column if missing
     const serverCols = this.db.prepare("PRAGMA table_info(servers)").all() as any[];
@@ -229,6 +289,35 @@ export class DatabaseService implements OnModuleDestroy {
       CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
       CREATE INDEX IF NOT EXISTS idx_sessions_server_id ON sessions(server_id);
       CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+
+      CREATE TABLE IF NOT EXISTS notices (
+        id                TEXT PRIMARY KEY,
+        kind              TEXT NOT NULL,
+        modal_policy      TEXT,
+        title             TEXT NOT NULL DEFAULT '',
+        content_format    TEXT NOT NULL DEFAULT 'text',
+        content           TEXT NOT NULL DEFAULT '',
+        image_url         TEXT NOT NULL DEFAULT '',
+        enabled           INTEGER NOT NULL DEFAULT 1,
+        sort_order        INTEGER NOT NULL DEFAULT 0,
+        repeat_after_sec  INTEGER,
+        revision          INTEGER NOT NULL DEFAULT 1,
+        created_at        INTEGER NOT NULL DEFAULT 0,
+        updated_at        INTEGER NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS notice_targets (
+        notice_id TEXT NOT NULL,
+        page      TEXT NOT NULL,
+        PRIMARY KEY (notice_id, page),
+        FOREIGN KEY (notice_id) REFERENCES notices(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_notices_enabled_order
+      ON notices(enabled, sort_order);
+
+      CREATE INDEX IF NOT EXISTS idx_notice_targets_page
+      ON notice_targets(page);
     `);
 
     // Migrate sessions table: add low_latency column if missing
@@ -274,6 +363,39 @@ export class DatabaseService implements OnModuleDestroy {
         this.logger.log('Backfilled kookBotToken from KOOK_BOT_TOKEN env');
       }
     }
+
+    const sunset = this.db.prepare("SELECT value FROM global_config WHERE key = 'legacyAdminSunsetAt'").get() as any;
+    if (!sunset) {
+      const configured = Date.parse(process.env.LEGACY_ADMIN_SUNSET_AT || '');
+      const sunsetAt = Number.isFinite(configured)
+        ? configured
+        : Date.now() + 30 * 24 * 60 * 60 * 1000;
+      this.setGlobalConfig('legacyAdminSunsetAt', String(sunsetAt));
+      this.logger.log(`Created legacy admin sunset time ${new Date(sunsetAt).toISOString()}`);
+    }
+
+    const defaultNoticeId = 'view-adaptive-bitrate';
+    const defaultNotice = this.db.prepare('SELECT id FROM notices WHERE id = ?').get(defaultNoticeId);
+    if (!defaultNotice) {
+      const now = Date.now();
+      const insertDefaultNotice = this.db.transaction(() => {
+        this.db.prepare(`
+          INSERT INTO notices (
+            id, kind, modal_policy, title, content_format, content, image_url,
+            enabled, sort_order, repeat_after_sec, revision, created_at, updated_at
+          ) VALUES (?, 'banner', NULL, '', 'text', ?, '', 1, 0, ?, 1, ?, ?)
+        `).run(
+          defaultNoticeId,
+          '首次接入时系统将根据网络情况动态调整码率，稍加等待视频会逐步增加清晰度和流畅度。',
+          7 * 24 * 60 * 60,
+          now,
+          now,
+        );
+        this.db.prepare('INSERT INTO notice_targets (notice_id, page) VALUES (?, ?)').run(defaultNoticeId, 'view');
+      });
+      insertDefaultNotice();
+      this.logger.log('Seeded default adaptive bitrate notice');
+    }
   }
 
   // ===== Global Config =====
@@ -287,6 +409,7 @@ export class DatabaseService implements OnModuleDestroy {
       publicDomain: map.get('publicDomain') || 'http://localhost:3520',
       triggerWordLabels: this.parseTriggerWordLabels(map.get('triggerWordLabels')),
       qualityBitrates: this.parseQualityBitrates(map.get('qualityBitrates')),
+      legacyAdminSunsetAt: Number(map.get('legacyAdminSunsetAt')) || 0,
     };
   }
 
@@ -352,6 +475,21 @@ export class DatabaseService implements OnModuleDestroy {
     return rows.map(row => this.mapServerRow(row));
   }
 
+  getSpace(platform: string, externalId: string): ServerRecord | undefined {
+    const row = this.db.prepare(
+      'SELECT * FROM servers WHERE platform = ? AND external_id = ?',
+    ).get(platform, externalId) as any;
+    if (!row) return undefined;
+    return this.mapServerRow(row);
+  }
+
+  listSpaces(platform?: string): ServerRecord[] {
+    const rows = platform
+      ? this.db.prepare('SELECT * FROM servers WHERE platform = ? ORDER BY created_at DESC').all(platform) as any[]
+      : this.db.prepare('SELECT * FROM servers ORDER BY platform, created_at DESC').all() as any[];
+    return rows.map(row => this.mapServerRow(row));
+  }
+
   /** 将数据库行（下划线字段名）映射为 ServerSession（驼峰字段名） */
   private mapSessionRow(row: any): ServerSession {
     return {
@@ -388,6 +526,8 @@ export class DatabaseService implements OnModuleDestroy {
   private mapServerRow(row: any): ServerRecord {
     return {
       serverId: row.server_id,
+      platform: row.platform || 'kook',
+      externalId: row.external_id || row.server_id,
       openId: row.open_id,
       guildName: row.guild_name,
       ownerId: row.owner_id,
@@ -448,9 +588,25 @@ export class DatabaseService implements OnModuleDestroy {
     
     const serverSecret = randomBytes(32).toString('hex');
     this.db.prepare(`
-      INSERT INTO servers (server_id, open_id, guild_name, owner_id, owner_username, bound, status, public_domain, trigger_words, server_secret, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?, ?)
-    `).run(serverId, openId || '', guildName, ownerId, ownerUsername, globalCfg.publicDomain, globalCfg.triggerWordLabels.join(','), serverSecret, now, now);
+      INSERT INTO servers (
+        server_id, platform, external_id, open_id, guild_name, owner_id,
+        owner_username, bound, status, public_domain, trigger_words,
+        server_secret, created_at, updated_at
+      )
+      VALUES (?, 'kook', ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?, ?)
+    `).run(
+      serverId,
+      serverId,
+      openId || '',
+      guildName,
+      ownerId,
+      ownerUsername,
+      globalCfg.publicDomain,
+      globalCfg.triggerWordLabels.join(','),
+      serverSecret,
+      now,
+      now,
+    );
     return this.getServer(serverId)!;
   }
 
@@ -661,5 +817,160 @@ export class DatabaseService implements OnModuleDestroy {
   deleteSession(id: string): boolean {
     const result = this.db.prepare("DELETE FROM sessions WHERE id = ? AND status = 'ended'").run(id);
     return result.changes > 0;
+  }
+
+  // ===== Notices =====
+
+  private mapNoticeRow(row: any, targets: NoticeTargetPage[]): NoticeRecord {
+    return {
+      id: row.id,
+      kind: row.kind,
+      modalPolicy: row.modal_policy || null,
+      title: row.title || '',
+      contentFormat: row.content_format,
+      content: row.content || '',
+      imageUrl: row.image_url || '',
+      enabled: row.enabled,
+      sortOrder: row.sort_order,
+      repeatAfterSec: row.repeat_after_sec ?? null,
+      revision: row.revision,
+      targets,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private getNoticeTargets(ids: string[]): Map<string, NoticeTargetPage[]> {
+    const result = new Map<string, NoticeTargetPage[]>();
+    if (ids.length === 0) return result;
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = this.db.prepare(
+      `SELECT notice_id, page FROM notice_targets WHERE notice_id IN (${placeholders})`,
+    ).all(...ids) as any[];
+    for (const row of rows) {
+      const pages = result.get(row.notice_id) || [];
+      pages.push(row.page as NoticeTargetPage);
+      result.set(row.notice_id, pages);
+    }
+    return result;
+  }
+
+  listNotices(page?: NoticeTargetPage, includeDisabled = false): NoticeRecord[] {
+    const where: string[] = [];
+    const values: any[] = [];
+    if (!includeDisabled) where.push('n.enabled = 1');
+    if (page) {
+      where.push('EXISTS (SELECT 1 FROM notice_targets nt WHERE nt.notice_id = n.id AND nt.page = ?)');
+      values.push(page);
+    }
+    const sql = `
+      SELECT n.*
+      FROM notices n
+      ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY n.sort_order ASC, n.created_at ASC
+    `;
+    const rows = this.db.prepare(sql).all(...values) as any[];
+    const targets = this.getNoticeTargets(rows.map(row => row.id));
+    return rows.map(row => this.mapNoticeRow(row, targets.get(row.id) || []));
+  }
+
+  getNotice(id: string): NoticeRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM notices WHERE id = ?').get(id) as any;
+    if (!row) return undefined;
+    const targets = this.getNoticeTargets([id]).get(id) || [];
+    return this.mapNoticeRow(row, targets);
+  }
+
+  createNotice(id: string, input: NoticeWriteInput): NoticeRecord {
+    const now = Date.now();
+    const create = this.db.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO notices (
+          id, kind, modal_policy, title, content_format, content, image_url,
+          enabled, sort_order, repeat_after_sec, revision, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      `).run(
+        id,
+        input.kind,
+        input.kind === 'modal' ? input.modalPolicy : null,
+        input.title || '',
+        input.contentFormat,
+        input.content,
+        input.imageUrl || '',
+        input.enabled ? 1 : 0,
+        input.sortOrder,
+        input.repeatAfterSec ?? null,
+        now,
+        now,
+      );
+      const insertTarget = this.db.prepare(
+        'INSERT INTO notice_targets (notice_id, page) VALUES (?, ?)',
+      );
+      for (const page of input.targets) insertTarget.run(id, page);
+    });
+    create();
+    return this.getNotice(id)!;
+  }
+
+  updateNotice(id: string, input: NoticeWriteInput, bumpRevision: boolean): NoticeRecord | undefined {
+    if (!this.getNotice(id)) return undefined;
+    const update = this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE notices SET
+          kind = ?,
+          modal_policy = ?,
+          title = ?,
+          content_format = ?,
+          content = ?,
+          image_url = ?,
+          enabled = ?,
+          sort_order = ?,
+          repeat_after_sec = ?,
+          revision = revision + ?,
+          updated_at = ?
+        WHERE id = ?
+      `).run(
+        input.kind,
+        input.kind === 'modal' ? input.modalPolicy : null,
+        input.title || '',
+        input.contentFormat,
+        input.content,
+        input.imageUrl || '',
+        input.enabled ? 1 : 0,
+        input.sortOrder,
+        input.repeatAfterSec ?? null,
+        bumpRevision ? 1 : 0,
+        Date.now(),
+        id,
+      );
+      this.db.prepare('DELETE FROM notice_targets WHERE notice_id = ?').run(id);
+      const insertTarget = this.db.prepare(
+        'INSERT INTO notice_targets (notice_id, page) VALUES (?, ?)',
+      );
+      for (const page of input.targets) insertTarget.run(id, page);
+    });
+    update();
+    return this.getNotice(id);
+  }
+
+  deleteNotice(id: string): boolean {
+    return this.db.prepare('DELETE FROM notices WHERE id = ?').run(id).changes > 0;
+  }
+
+  reorderNotices(ids: string[]): void {
+    const update = this.db.prepare(
+      'UPDATE notices SET sort_order = ?, updated_at = ? WHERE id = ?',
+    );
+    const reorder = this.db.transaction(() => {
+      ids.forEach((id, index) => update.run(index, Date.now(), id));
+    });
+    reorder();
+  }
+
+  republishNotice(id: string): NoticeRecord | undefined {
+    const result = this.db.prepare(
+      'UPDATE notices SET revision = revision + 1, updated_at = ? WHERE id = ?',
+    ).run(Date.now(), id);
+    return result.changes > 0 ? this.getNotice(id) : undefined;
   }
 }

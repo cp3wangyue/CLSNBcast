@@ -8,6 +8,7 @@ import { KookModule } from './modules/kook/kook.module';
 import { ShareModule } from './modules/share/share.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { ServerAdminModule } from './modules/server-admin/server-admin.module';
+import { NoticesModule } from './modules/notices/notices.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ServerAdminModule } from './modules/server-admin/server-admin.module';
     ShareModule,
     SuperAdminModule,
     ServerAdminModule,
+    NoticesModule,
   ],
 })
 export class AppModule {}
