@@ -13,6 +13,14 @@ export class UpdateGlobalConfigDto {
 
   @IsOptional()
   @IsString()
+  kookVerifyToken?: string;
+
+  @IsOptional()
+  @IsString()
+  kookEncryptKey?: string;
+
+  @IsOptional()
+  @IsString()
   publicDomain?: string;
 
   @IsOptional()
