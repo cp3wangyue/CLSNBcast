@@ -3,15 +3,13 @@ import { SessionService } from '../session/session.service';
 import { DatabaseService } from '../database/database.service';
 import { EventBusService } from '../events/events.service';
 import { buildShareLinkCard, buildViewingCard, buildEndedShareCard, buildHelpCard, buildBindCard, buildAlreadyBoundCard, buildBindRequestCard } from './card-builder';
-import { KookClient, KookMessageEvent, KookButtonClickEvent } from './kook-client';
+import { KookApiClient } from './kook-api.client';
+import { KookMessageEvent, KookButtonClickEvent } from './kook-event.types';
 
 @Injectable()
 export class KookService implements OnModuleInit {
   private readonly logger = new Logger(KookService.name);
-  private bot: KookClient | null = null;
-  /** 已处理的消息 ID 去重（LRU 式，防止 WebSocket 重连后重放导致重复处理） */
-  private processedMessageIds = new Set<string>();
-  private readonly MAX_PROCESSED_IDS = 500;
+  private bot: KookApiClient | null = null;
   /** 用户+频道维度的触发频率限制，防止快速连发导致重复创建 session */
   private recentTriggers = new Map<string, number>();
   private readonly TRIGGER_COOLDOWN_MS = 10000; // 10 秒冷却
@@ -26,10 +24,10 @@ export class KookService implements OnModuleInit {
   async onModuleInit() {
     this.bus.onSessionStarted((event) => this.handleSessionStarted(event));
     this.bus.onSessionEnded((event) => this.handleSessionEnded(event));
-    await this.startBot();
+    await this.startApiClient();
   }
 
-  async startBot() {
+  async startApiClient() {
     const globalCfg = this.db.getGlobalConfig();
     const token = globalCfg.kookBotToken;
     if (!token) {
@@ -37,54 +35,18 @@ export class KookService implements OnModuleInit {
       return;
     }
     try {
-      this.bot = new KookClient(token);
-
-      this.bot.on('ready', async (user: any) => {
-        this.logger.log('KOOK bot ready: ' + (user?.username || '(unknown)') + ' (id=' + (user?.id || 'null') + ')');
-        // If bot info not in HELLO, fetch from API
-        if (!user?.id) {
-          try {
-            const me = await this.bot?.getMe();
-            if (me?.id) {
-              this.logger.log(`KOOK bot info fetched from API: ${me.username} (id=${me.id})`);
-              // Update botId in KookClient
-              (this.bot as any).botId = me.id;
-            }
-          } catch (err) {
-            this.logger.warn('Failed to fetch bot info from API: ' + err);
-          }
-        }
-        // Sync existing guilds - 即使没有 bot 信息也要执行
-        await this.syncGuilds();
-      });
-      this.bot.on('error', (err: any) => {
-        this.logger.error('KOOK bot error: ' + (err?.message || err));
-      });
-      this.bot.on('close', (code: number) => {
-        this.logger.warn(`KOOK bot connection closed (code: ${code})`);
-      });
-      this.bot.on('message', async (event: KookMessageEvent) => {
-        await this.handleMessage(event);
-      });
-      this.bot.on('button_click', async (event: KookButtonClickEvent) => {
-        await this.handleButtonClick(event);
-      });
-      this.bot.on('guild_join', async (event: { guildId: string; guildName: string }) => {
-        await this.handleGuildJoin(event.guildId, event.guildName);
-      });
-      this.bot.on('guild_leave', async (event: { guildId: string }) => {
-        await this.handleGuildLeave(event.guildId);
-      });
-
-      this.logger.log('KOOK bot starting...');
-      await this.bot.start();
+      this.bot = new KookApiClient(token);
+      const me = await this.bot.getMe();
+      if (me?.id) this.bot.setBotId(String(me.id));
+      this.logger.log(`KOOK API client ready: ${me?.username || '(unknown)'} (id=${me?.id || 'unknown'})`);
+      await this.syncGuilds();
     } catch (err: any) {
-      this.logger.error('KOOK bot init failed: ' + (err?.message || err));
+      this.logger.error('KOOK API client init failed: ' + (err?.message || err));
     }
   }
 
-  get isRunning(): boolean {
-    return this.bot?.isRunning() ?? false;
+  get isReady(): boolean {
+    return !!this.bot;
   }
 
   /** Sync bot's current guilds with database */
@@ -126,7 +88,7 @@ export class KookService implements OnModuleInit {
   }
 
   /** Bot joins a guild: create server record and send bind card to owner */
-  private async handleGuildJoin(guildId: string, guildName: string) {
+  async handleGuildJoin(guildId: string, guildName: string) {
     this.logger.log(`[EVENT] Bot joining guild: guildId=${guildId}, guildName=${guildName || '(empty)'}`);
     
     // Wait a bit for the bot to fully join the guild
@@ -206,7 +168,7 @@ export class KookService implements OnModuleInit {
   }
 
   /** Bot leaves a guild: mark server as kicked (don't delete) */
-  private async handleGuildLeave(guildId: string) {
+  async handleGuildLeave(guildId: string) {
     this.logger.log(`[EVENT] Bot leaving guild: guildId=${guildId}`);
     
     // 记录机器人被踢出事件
@@ -238,23 +200,9 @@ export class KookService implements OnModuleInit {
     };
   }
 
-  private async handleMessage(event: KookMessageEvent) {
+  async handleIncomingMessage(event: KookMessageEvent) {
     const content = (event.content || '').trim();
     if (!content) return;
-
-    // 消息 ID 去重：防止 WebSocket 重连后消息重放导致重复处理
-    if (event.id) {
-      if (this.processedMessageIds.has(event.id)) {
-        this.logger.warn(`duplicate message ignored: ${event.id}`);
-        return;
-      }
-      this.processedMessageIds.add(event.id);
-      // 清理旧 ID，防止内存无限增长
-      if (this.processedMessageIds.size > this.MAX_PROCESSED_IDS) {
-        const firstId = this.processedMessageIds.values().next().value;
-        if (firstId) this.processedMessageIds.delete(firstId);
-      }
-    }
 
     // 忽略机器人自己发的消息，防止死循环（三重保险）
     const botId = this.bot?.getBotId();
@@ -443,7 +391,7 @@ export class KookService implements OnModuleInit {
       this.logger.log(`temporary start card sent to ${authorId} in ${channelId}`);
     } catch (err: any) {
       this.logger.error('send temporary start card failed: ' + (err?.message || err));
-      this.sessionService.deleteSession(session.id);
+      this.sessionService.cancelPendingSession(session.id);
       await this.sendTempNotice(
         channelId,
         authorId,
@@ -453,7 +401,7 @@ export class KookService implements OnModuleInit {
   }
 
   /** 处理卡片按钮点击回调（如「重新发起共享」） */
-  private async handleButtonClick(event: KookButtonClickEvent) {
+  async handleButtonClick(event: KookButtonClickEvent) {
     this.logger.log(
       `button_click: value=${event.value}, user=${event.username}(${event.userId}), ` +
       `channel=${event.targetId}, guild=${event.guildId || '(none)'}`,
@@ -528,7 +476,7 @@ export class KookService implements OnModuleInit {
       this.logger.log(`temporary button start card sent to ${event.userId} in ${event.targetId}`);
     } catch (err: any) {
       this.logger.error('temporary button start card failed: ' + (err?.message || err));
-      this.sessionService.deleteSession(session.id);
+      this.sessionService.cancelPendingSession(session.id);
       await this.sendTempNotice(
         event.targetId,
         event.userId,
@@ -545,12 +493,12 @@ export class KookService implements OnModuleInit {
     guildId: string;
   }) {
     this.logger.log(
-      `handleSessionStarted: sessionId=${event.sessionId}, targetChannelId=${event.targetChannelId || '(empty)'}, bot=${!!this.bot}, isRunning=${this.bot?.isRunning()}`,
+      `handleSessionStarted: sessionId=${event.sessionId}, targetChannelId=${event.targetChannelId || '(empty)'}, apiReady=${!!this.bot}`,
     );
     const session = this.sessionService.getById(event.sessionId);
     if (!session || session.cardMessageId || this.publishingViewingCards.has(event.sessionId)) return;
     const serverConfig = this.getServerConfig(event.guildId);
-    if (!serverConfig || !event.targetChannelId || !this.bot?.isRunning()) return;
+    if (!serverConfig || !event.targetChannelId || !this.bot) return;
 
     this.publishingViewingCards.add(event.sessionId);
     try {
@@ -592,13 +540,11 @@ export class KookService implements OnModuleInit {
     this.logger.log(
       `handleSessionEnded: sessionId=${event.sessionId}, reason=${event.reason}, ` +
       `cardMessageId=${event.cardMessageId || '(none)'}, targetChannelId=${event.targetChannelId || '(none)'}, ` +
-      `botRunning=${this.bot?.isRunning() ?? false}`,
+      `apiReady=${!!this.bot}`,
     );
 
-    if (!this.bot || !this.bot.isRunning()) {
-      this.logger.warn(
-        `handleSessionEnded: bot not running, skip for ${event.sessionId}`,
-      );
+    if (!this.bot) {
+      this.logger.warn(`handleSessionEnded: KOOK API client unavailable, skip for ${event.sessionId}`);
       return;
     }
 

@@ -55,8 +55,11 @@ Docker 在线构建阶段只会安装服务端生产依赖，并把已上传的�
 
 1. 访问 `http://你的域名:3520/super`
 2. 使用 `SUPER_ADMIN_PASSWORD` 登录
-3. 在「全局配置」中填入 KOOK Bot Token 和公网域名
-4. 邀请机器人到 KOOK 服务器，机器人会自动同步服务器列表
+3. 在「全局配置」中填入 KOOK Bot Token、Verify Token、Encrypt Key 和公网域名
+4. 在 KOOK 开发者后台将机器人连接模式设为 **WebHook**
+5. Callback URL 填写超管页面显示的地址（必须保留 `?compress=0`）
+6. 在 KOOK 后台填写相同的 Encrypt Key，完成 Challenge 后上线机器人
+7. 邀请机器人到 KOOK 服务器，机器人会自动同步服务器列表
 
 ### 5. 服务器绑定（频道主操作）
 
@@ -90,6 +93,9 @@ server {
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
     }
+
+    # KOOK WebHook 回调请求体上限
+    client_max_body_size 1m;
 }
 ```
 

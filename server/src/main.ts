@@ -51,13 +51,22 @@ setInterval(() => {
 }, 60_000);
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
   const db = app.get(DatabaseService);
 
   // Security headers
   app.use(helmet({
     contentSecurityPolicy: false, // reshare 端点内联样式/脚本需要
   }));
+
+  // KOOK Webhook 必须保留原始请求体，且要先于全局 JSON parser 注册。
+  // body-parser 会按 Content-Encoding 解压；Codec 另外兼容没有 Header 的 zlib 数据。
+  app.use(
+    '/api/integrations/kook/webhook',
+    bodyParser.raw({ type: () => true, limit: '1mb', inflate: true }),
+  );
 
   // 解析 application/x-www-form-urlencoded（用于重新发起共享确认表单）
   app.use(bodyParser.urlencoded({ extended: false, limit: '1mb' }));

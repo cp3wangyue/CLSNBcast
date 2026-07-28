@@ -65,6 +65,8 @@ export class SuperAdminController {
     const cfg = this.db.getGlobalConfig();
     return {
       kookBotToken: cfg.kookBotToken ? '******' : '',
+      kookVerifyToken: cfg.kookVerifyToken ? '******' : '',
+      kookEncryptKey: cfg.kookEncryptKey ? '******' : '',
       publicDomain: cfg.publicDomain,
       triggerWordLabels: cfg.triggerWordLabels,
       qualityBitrates: cfg.qualityBitrates,
@@ -87,6 +89,12 @@ export class SuperAdminController {
   updateConfig(@Body() dto: UpdateGlobalConfigDto) {
     if (dto.kookBotToken !== undefined && dto.kookBotToken !== '******') {
       this.db.setGlobalConfig('kookBotToken', dto.kookBotToken);
+    }
+    if (dto.kookVerifyToken !== undefined && dto.kookVerifyToken !== '******') {
+      this.db.setGlobalConfig('kookVerifyToken', dto.kookVerifyToken);
+    }
+    if (dto.kookEncryptKey !== undefined && dto.kookEncryptKey !== '******') {
+      this.db.setGlobalConfig('kookEncryptKey', dto.kookEncryptKey);
     }
     if (dto.publicDomain !== undefined) {
       this.db.setGlobalConfig('publicDomain', dto.publicDomain);

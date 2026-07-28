@@ -15,6 +15,7 @@ dist/
 
 # Internal development docs (not for public repo)
 memory.md
+CONTEXT.md
 plans/
 
 # IDE

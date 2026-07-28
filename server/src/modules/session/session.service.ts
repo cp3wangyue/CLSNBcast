@@ -179,6 +179,10 @@ export class SessionService implements OnModuleInit {
     return sessions.length > 0;
   }
 
+  cancelPendingSession(id: string): boolean {
+    return this.db.deletePendingSession(id);
+  }
+
   listAll(): ShareSession[] {
     return this.db.getAllSessions().map((s) => this.fromDb(s));
   }

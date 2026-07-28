@@ -245,7 +245,7 @@ function GlobalConfigPanel() {
     <div className="space-y-6">
       <div className="glass rounded-2xl p-5">
         <h3 className="font-semibold text-white">KOOK 机器人</h3>
-        <p className="text-xs text-muted mb-4 mt-0.5">配置全局机器人 Token</p>
+        <p className="text-xs text-muted mb-4 mt-0.5">配置 KOOK HTTP API 与 WebHook 回调凭证</p>
         <div className="space-y-3">
           <div>
             <label className="text-xs text-muted mb-1 block">Bot Token</label>
@@ -258,6 +258,26 @@ function GlobalConfigPanel() {
             />
           </div>
           <div>
+            <label className="text-xs text-muted mb-1 block">Verify Token</label>
+            <input
+              type="password"
+              value={config.kookVerifyToken || ''}
+              onChange={(e) => setConfig({ ...config, kookVerifyToken: e.target.value })}
+              placeholder="KOOK 开发者后台的 Verify Token"
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3.5 py-2.5 text-sm text-white placeholder:text-dim focus:outline-none focus:border-brand/50"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted mb-1 block">Encrypt Key</label>
+            <input
+              type="password"
+              value={config.kookEncryptKey || ''}
+              onChange={(e) => setConfig({ ...config, kookEncryptKey: e.target.value })}
+              placeholder="KOOK WebHook 消息加密密钥"
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3.5 py-2.5 text-sm text-white placeholder:text-dim focus:outline-none focus:border-brand/50"
+            />
+          </div>
+          <div>
             <label className="text-xs text-muted mb-1 block">公共域名</label>
             <input
               type="text"
@@ -266,6 +286,13 @@ function GlobalConfigPanel() {
               placeholder="https://your-domain.com"
               className="w-full bg-white/5 border border-white/10 rounded-lg px-3.5 py-2.5 text-sm text-white placeholder:text-dim focus:outline-none focus:border-brand/50"
             />
+          </div>
+          <div className="rounded-lg bg-white/5 px-3.5 py-3 text-xs text-muted">
+            <p>Callback URL</p>
+            <p className="mt-1 break-all text-white">
+              {(config.publicDomain || '').replace(/\/+$/, '')}/api/integrations/kook/webhook?compress=0
+            </p>
+            <p className="mt-2 text-amber-300">修改 Bot Token 后需要重启服务；Verify Token 和 Encrypt Key 保存后立即用于回调校验。</p>
           </div>
         </div>
       </div>

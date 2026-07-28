@@ -9,10 +9,20 @@ import { getDefaultQualityBitrates, QualityBitrateConfig } from '../session/sess
 
 export interface GlobalConfig {
   kookBotToken: string;
+  kookVerifyToken: string;
+  kookEncryptKey: string;
   publicDomain: string;
   triggerWordLabels: string[];
   qualityBitrates: QualityBitrateConfig;
   legacyAdminSunsetAt: number;
+}
+
+export interface KookWebhookEventRecord {
+  eventKey: string;
+  sn: number | null;
+  eventType: string;
+  payload: string;
+  attempts: number;
 }
 
 export interface ServerRecord {
@@ -135,6 +145,7 @@ export class DatabaseService implements OnModuleDestroy {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
+    this.db.pragma('busy_timeout = 5000');
     this.migrate();
     this.logger.log(`SQLite database ready at ${dbPath}`);
   }
@@ -318,6 +329,28 @@ export class DatabaseService implements OnModuleDestroy {
 
       CREATE INDEX IF NOT EXISTS idx_notice_targets_page
       ON notice_targets(page);
+
+      CREATE TABLE IF NOT EXISTS kook_webhook_events (
+        event_key       TEXT PRIMARY KEY,
+        event_id        TEXT NOT NULL DEFAULT '',
+        sn              INTEGER,
+        event_type      TEXT NOT NULL DEFAULT '',
+        payload         TEXT NOT NULL,
+        payload_hash    TEXT NOT NULL,
+        status          TEXT NOT NULL DEFAULT 'pending',
+        attempts        INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL DEFAULT 0,
+        locked_at       INTEGER,
+        last_error_code TEXT NOT NULL DEFAULT '',
+        received_at     INTEGER NOT NULL,
+        processed_at    INTEGER
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_kook_webhook_claim
+      ON kook_webhook_events(status, next_attempt_at, received_at);
+
+      CREATE INDEX IF NOT EXISTS idx_kook_webhook_sn
+      ON kook_webhook_events(sn, received_at);
     `);
 
     // Migrate sessions table: add low_latency column if missing
@@ -341,6 +374,12 @@ export class DatabaseService implements OnModuleDestroy {
       ins.run('triggerWordLabels', JSON.stringify(['屏幕共享', '共享屏幕']));
       this.logger.log('Seeded default global config');
     }
+    this.db.prepare(
+      "INSERT OR IGNORE INTO global_config (key, value) VALUES ('kookVerifyToken', '')",
+    ).run();
+    this.db.prepare(
+      "INSERT OR IGNORE INTO global_config (key, value) VALUES ('kookEncryptKey', '')",
+    ).run();
 
     // Preserve every existing per-server trigger word when introducing the
     // global label library.
@@ -406,6 +445,8 @@ export class DatabaseService implements OnModuleDestroy {
     for (const r of rows) map.set(r.key, r.value);
     return {
       kookBotToken: map.get('kookBotToken') || '',
+      kookVerifyToken: map.get('kookVerifyToken') || '',
+      kookEncryptKey: map.get('kookEncryptKey') || '',
       publicDomain: map.get('publicDomain') || 'http://localhost:3520',
       triggerWordLabels: this.parseTriggerWordLabels(map.get('triggerWordLabels')),
       qualityBitrates: this.parseQualityBitrates(map.get('qualityBitrates')),
@@ -817,6 +858,162 @@ export class DatabaseService implements OnModuleDestroy {
   deleteSession(id: string): boolean {
     const result = this.db.prepare("DELETE FROM sessions WHERE id = ? AND status = 'ended'").run(id);
     return result.changes > 0;
+  }
+
+  deletePendingSession(id: string): boolean {
+    const result = this.db.prepare(
+      "DELETE FROM sessions WHERE id = ? AND status = 'pending' AND card_message_id IS NULL",
+    ).run(id);
+    return result.changes > 0;
+  }
+
+  // ===== KOOK Webhook Inbox =====
+
+  enqueueKookWebhookEvent(input: {
+    eventKey: string;
+    eventId: string;
+    sn: number | null;
+    eventType: string;
+    payload: string;
+    payloadHash: string;
+  }): { inserted: boolean; eventKey: string; conflict: boolean } {
+    const enqueue = this.db.transaction(() => {
+      const existing = this.db.prepare(
+        'SELECT payload_hash FROM kook_webhook_events WHERE event_key = ?',
+      ).get(input.eventKey) as any;
+      if (existing?.payload_hash === input.payloadHash) {
+        return { inserted: false, eventKey: input.eventKey, conflict: false };
+      }
+
+      let eventKey = input.eventKey;
+      let conflict = false;
+      if (existing) {
+        conflict = true;
+        eventKey = `${input.eventKey}:${input.payloadHash.slice(0, 16)}`;
+        const conflictExisting = this.db.prepare(
+          'SELECT payload_hash FROM kook_webhook_events WHERE event_key = ?',
+        ).get(eventKey) as any;
+        if (conflictExisting?.payload_hash === input.payloadHash) {
+          return { inserted: false, eventKey, conflict: true };
+        }
+      }
+
+      const now = Date.now();
+      this.db.prepare(`
+        INSERT INTO kook_webhook_events (
+          event_key, event_id, sn, event_type, payload, payload_hash,
+          status, attempts, next_attempt_at, received_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+      `).run(
+        eventKey,
+        input.eventId,
+        input.sn,
+        input.eventType,
+        input.payload,
+        input.payloadHash,
+        now,
+        now,
+      );
+      return { inserted: true, eventKey, conflict };
+    });
+    return enqueue();
+  }
+
+  recoverStaleKookWebhookEvents(staleBefore: number): number {
+    return this.db.prepare(`
+      UPDATE kook_webhook_events
+      SET status = 'pending', locked_at = NULL, next_attempt_at = ?
+      WHERE status = 'processing' AND locked_at < ?
+    `).run(Date.now(), staleBefore).changes;
+  }
+
+  claimKookWebhookEvent(): KookWebhookEventRecord | undefined {
+    const claim = this.db.transaction(() => {
+      const now = Date.now();
+      const row = this.db.prepare(`
+        SELECT event_key, sn, event_type, payload, attempts
+        FROM kook_webhook_events
+        WHERE status = 'pending' AND next_attempt_at <= ?
+        ORDER BY received_at ASC
+        LIMIT 1
+      `).get(now) as any;
+      if (!row) return undefined;
+      const updated = this.db.prepare(`
+        UPDATE kook_webhook_events
+        SET status = 'processing', attempts = attempts + 1, locked_at = ?
+        WHERE event_key = ? AND status = 'pending'
+      `).run(now, row.event_key);
+      if (updated.changes !== 1) return undefined;
+      return {
+        eventKey: row.event_key,
+        sn: row.sn == null ? null : Number(row.sn),
+        eventType: row.event_type || '',
+        payload: row.payload,
+        attempts: Number(row.attempts) + 1,
+      } as KookWebhookEventRecord;
+    });
+    return claim();
+  }
+
+  completeKookWebhookEvent(eventKey: string, status: 'done' | 'ignored'): void {
+    this.db.prepare(`
+      UPDATE kook_webhook_events
+      SET status = ?, processed_at = ?, locked_at = NULL, last_error_code = ''
+      WHERE event_key = ?
+    `).run(status, Date.now(), eventKey);
+  }
+
+  retryKookWebhookEvent(eventKey: string, nextAttemptAt: number, errorCode: string): void {
+    this.db.prepare(`
+      UPDATE kook_webhook_events
+      SET status = 'pending', next_attempt_at = ?, locked_at = NULL, last_error_code = ?
+      WHERE event_key = ?
+    `).run(nextAttemptAt, errorCode.slice(0, 100), eventKey);
+  }
+
+  deadKookWebhookEvent(eventKey: string, errorCode: string): void {
+    this.db.prepare(`
+      UPDATE kook_webhook_events
+      SET status = 'dead', processed_at = ?, locked_at = NULL, last_error_code = ?
+      WHERE event_key = ?
+    `).run(Date.now(), errorCode.slice(0, 100), eventKey);
+  }
+
+  getKookWebhookStatus(): {
+    pending: number;
+    processing: number;
+    done: number;
+    ignored: number;
+    dead: number;
+    oldestPendingAt: number | null;
+  } {
+    const counts = this.db.prepare(`
+      SELECT status, COUNT(*) AS count
+      FROM kook_webhook_events
+      GROUP BY status
+    `).all() as any[];
+    const map = new Map(counts.map((row) => [String(row.status), Number(row.count)]));
+    const oldest = this.db.prepare(`
+      SELECT MIN(received_at) AS received_at
+      FROM kook_webhook_events
+      WHERE status IN ('pending', 'processing')
+    `).get() as any;
+    return {
+      pending: map.get('pending') || 0,
+      processing: map.get('processing') || 0,
+      done: map.get('done') || 0,
+      ignored: map.get('ignored') || 0,
+      dead: map.get('dead') || 0,
+      oldestPendingAt: oldest?.received_at == null ? null : Number(oldest.received_at),
+    };
+  }
+
+  cleanupKookWebhookEvents(doneBefore: number, deadBefore: number): number {
+    return this.db.prepare(`
+      DELETE FROM kook_webhook_events
+      WHERE (status IN ('done', 'ignored') AND processed_at < ?)
+         OR (status = 'dead' AND processed_at < ?)
+    `).run(doneBefore, deadBefore).changes;
   }
 
   // ===== Notices =====
