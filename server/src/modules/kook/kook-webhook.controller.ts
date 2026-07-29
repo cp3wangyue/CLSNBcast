@@ -1,6 +1,8 @@
 import {
   Controller,
+  HttpCode,
   HttpException,
+  HttpStatus,
   Logger,
   Post,
   Req,
@@ -19,6 +21,7 @@ export class KookWebhookController {
   ) {}
 
   @Post('webhook')
+  @HttpCode(HttpStatus.OK)
   receive(@Req() request: Request) {
     try {
       const envelope = this.codec.decode(request.body as unknown as Buffer);

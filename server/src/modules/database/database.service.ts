@@ -351,6 +351,19 @@ export class DatabaseService implements OnModuleDestroy {
 
       CREATE INDEX IF NOT EXISTS idx_kook_webhook_sn
       ON kook_webhook_events(sn, received_at);
+
+      CREATE TABLE IF NOT EXISTS kook_webhook_effects (
+        effect_key   TEXT PRIMARY KEY,
+        event_key    TEXT NOT NULL UNIQUE,
+        status       TEXT NOT NULL DEFAULT 'processing',
+        result       TEXT NOT NULL DEFAULT '',
+        created_at   INTEGER NOT NULL,
+        updated_at   INTEGER NOT NULL,
+        FOREIGN KEY (event_key) REFERENCES kook_webhook_events(event_key) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_kook_webhook_effect_status
+      ON kook_webhook_effects(status, updated_at);
     `);
 
     // Migrate sessions table: add low_latency column if missing
@@ -963,6 +976,88 @@ export class DatabaseService implements OnModuleDestroy {
     `).run(status, Date.now(), eventKey);
   }
 
+  beginKookWebhookBusinessEffect(eventKey: string): 'execute' | 'done' | 'ignored' | 'uncertain' {
+    const begin = this.db.transaction(() => {
+      const effectKey = `business:${eventKey}`;
+      const existing = this.db.prepare(`
+        SELECT status, result
+        FROM kook_webhook_effects
+        WHERE effect_key = ?
+      `).get(effectKey) as any;
+      const now = Date.now();
+
+      if (!existing) {
+        this.db.prepare(`
+          INSERT INTO kook_webhook_effects (
+            effect_key, event_key, status, result, created_at, updated_at
+          ) VALUES (?, ?, 'processing', '', ?, ?)
+        `).run(effectKey, eventKey, now, now);
+        return 'execute' as const;
+      }
+
+      if (existing.status === 'done' || existing.status === 'ignored') {
+        this.db.prepare(`
+          UPDATE kook_webhook_events
+          SET status = ?, processed_at = ?, locked_at = NULL, last_error_code = ''
+          WHERE event_key = ?
+        `).run(existing.status, now, eventKey);
+        return existing.status as 'done' | 'ignored';
+      }
+
+      // An existing "processing" effect means the previous process stopped after
+      // business execution began. Its external side effects may already exist, so
+      // retrying would risk duplicate sessions or KOOK cards.
+      this.db.prepare(`
+        UPDATE kook_webhook_effects
+        SET status = 'uncertain', result = 'crash_window', updated_at = ?
+        WHERE effect_key = ?
+      `).run(now, effectKey);
+      this.db.prepare(`
+        UPDATE kook_webhook_events
+        SET status = 'uncertain', processed_at = ?, locked_at = NULL,
+            last_error_code = 'business_effect_uncertain'
+        WHERE event_key = ?
+      `).run(now, eventKey);
+      return 'uncertain' as const;
+    });
+    return begin();
+  }
+
+  completeKookWebhookBusinessEffect(eventKey: string, status: 'done' | 'ignored'): void {
+    const complete = this.db.transaction(() => {
+      const now = Date.now();
+      this.db.prepare(`
+        UPDATE kook_webhook_effects
+        SET status = ?, result = ?, updated_at = ?
+        WHERE event_key = ? AND status = 'processing'
+      `).run(status, status, now, eventKey);
+      this.db.prepare(`
+        UPDATE kook_webhook_events
+        SET status = ?, processed_at = ?, locked_at = NULL, last_error_code = ''
+        WHERE event_key = ?
+      `).run(status, now, eventKey);
+    });
+    complete();
+  }
+
+  markKookWebhookBusinessEffectUncertain(eventKey: string, errorCode: string): void {
+    const mark = this.db.transaction(() => {
+      const now = Date.now();
+      const safeCode = errorCode.slice(0, 100);
+      this.db.prepare(`
+        UPDATE kook_webhook_effects
+        SET status = 'uncertain', result = ?, updated_at = ?
+        WHERE event_key = ?
+      `).run(safeCode, now, eventKey);
+      this.db.prepare(`
+        UPDATE kook_webhook_events
+        SET status = 'uncertain', processed_at = ?, locked_at = NULL, last_error_code = ?
+        WHERE event_key = ?
+      `).run(now, safeCode, eventKey);
+    });
+    mark();
+  }
+
   retryKookWebhookEvent(eventKey: string, nextAttemptAt: number, errorCode: string): void {
     this.db.prepare(`
       UPDATE kook_webhook_events
@@ -985,6 +1080,7 @@ export class DatabaseService implements OnModuleDestroy {
     done: number;
     ignored: number;
     dead: number;
+    uncertain: number;
     oldestPendingAt: number | null;
   } {
     const counts = this.db.prepare(`
@@ -1004,6 +1100,7 @@ export class DatabaseService implements OnModuleDestroy {
       done: map.get('done') || 0,
       ignored: map.get('ignored') || 0,
       dead: map.get('dead') || 0,
+      uncertain: map.get('uncertain') || 0,
       oldestPendingAt: oldest?.received_at == null ? null : Number(oldest.received_at),
     };
   }
@@ -1012,7 +1109,7 @@ export class DatabaseService implements OnModuleDestroy {
     return this.db.prepare(`
       DELETE FROM kook_webhook_events
       WHERE (status IN ('done', 'ignored') AND processed_at < ?)
-         OR (status = 'dead' AND processed_at < ?)
+         OR (status IN ('dead', 'uncertain') AND processed_at < ?)
     `).run(doneBefore, deadBefore).changes;
   }
 

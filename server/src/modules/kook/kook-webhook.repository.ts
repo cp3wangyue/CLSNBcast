@@ -52,6 +52,18 @@ export class KookWebhookRepository {
     this.db.completeKookWebhookEvent(eventKey, ignored ? 'ignored' : 'done');
   }
 
+  beginBusinessEffect(eventKey: string): 'execute' | 'done' | 'ignored' | 'uncertain' {
+    return this.db.beginKookWebhookBusinessEffect(eventKey);
+  }
+
+  completeBusinessEffect(eventKey: string, ignored = false): void {
+    this.db.completeKookWebhookBusinessEffect(eventKey, ignored ? 'ignored' : 'done');
+  }
+
+  markBusinessEffectUncertain(eventKey: string, errorCode: string): void {
+    this.db.markKookWebhookBusinessEffectUncertain(eventKey, errorCode);
+  }
+
   retry(eventKey: string, attempts: number, errorCode: string): void {
     const delays = [2000, 5000, 15000, 60000, 300000];
     const base = delays[Math.min(Math.max(attempts - 1, 0), delays.length - 1)];

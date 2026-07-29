@@ -36,7 +36,7 @@ echo "[3/5] 上传到 ${SSH_HOST}:${REMOTE_DIR}"
 ssh "$SSH_HOST" "mkdir -p '$REMOTE_DIR'"
 scp "$LOCAL_ARCHIVE" "${SSH_HOST}:${REMOTE_DIR}/${ARCHIVE_NAME}"
 
-echo "[4/5] 替换 dist，删除旧容器和旧镜像，重新部署"
+echo "[4/5] 替换 dist，构建镜像并滚动更新容器"
 ssh "$SSH_HOST" bash -s -- "$REMOTE_DIR" "$ARCHIVE_NAME" "$SERVICE" <<'REMOTE_SCRIPT'
 set -Eeuo pipefail
 
@@ -78,17 +78,10 @@ mv -f -- "${STAGE_DIR}/web/package.json" "${REMOTE_DIR}/web/package.json"
 
 docker compose config --quiet
 
-# 先记录 Compose 当前使用的镜像，再删除容器和镜像。不会删除 volume。
-mapfile -t OLD_IMAGE_IDS < <(docker compose images -q | sort -u)
-docker compose down --remove-orphans
-
-for image_id in "${OLD_IMAGE_IDS[@]}"; do
-  docker image rm "$image_id" || true
-done
-
-	docker compose build --pull
-	docker image prune -f
-	docker compose up -d
+# 保留当前镜像用于 Docker 构建缓存。小改动只会重建 dist 对应的层；
+# 构建成功后由 Compose 替换容器。旧镜像保留，供需要时手动回滚。
+docker compose build --pull
+docker compose up -d --remove-orphans
 REMOTE_SCRIPT
 
 echo "[5/5] 等待服务健康"
