@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Body,
   Param,
   Query,
@@ -14,6 +15,11 @@ import { DatabaseService } from '../database/database.service';
 import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
 import { QUALITY_PRESETS } from '../session/session.types';
+import { AgoraProviderService } from '../agora/agora-provider.service';
+import {
+  CreateSpaceProviderDto,
+  UpdateSpaceProviderDto,
+} from '../agora/agora-provider.dto';
 import {
   ServerAdminLoginDto,
   UpdateServerConfigDto,
@@ -24,7 +30,10 @@ import {
 export class ServerAdminController {
   private readonly tokenTtlSec = 7 * 24 * 3600;
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly providers: AgoraProviderService,
+  ) {}
 
   private resolveSpace(params: Record<string, string>) {
     const platform = params.platform || 'kook';
@@ -178,5 +187,77 @@ export class ServerAdminController {
     const { server } = this.resolveSpace(params);
     if (!server) return [];
     return this.db.getSessionsByServerFiltered(server.serverId, server.reboundAt);
+  }
+
+  // ===== Agora Providers（频道主 BYOK）=====
+  //
+  // 频道主只能管理**自己服务器**的 Provider：
+  // - `ownerType` / `ownerId` 由服务端强制写入，请求里带也会被 ValidationPipe 的
+  //   `whitelist` 剥离。否则频道主可以伪造请求创建平台池 Provider，越权占用我们的声网账号。
+  // - 改/删之前校验目标 Provider 确实归属该服务器，避免用 ID 越权操作别人的凭证（IDOR）。
+  // - 响应走 `AgoraProviderAdminView`，只含 `hasAppCertificate` 布尔值，明文永不回传。
+
+  @Get(['server/:serverId/providers', 'spaces/:platform/:externalId/providers'])
+  listProviders(@Param() params: Record<string, string>) {
+    const { server } = this.resolveSpace(params);
+    if (!server) return [];
+    return this.providers.listForAdminByOwner('space', server.serverId);
+  }
+
+  @Post(['server/:serverId/providers', 'spaces/:platform/:externalId/providers'])
+  @HttpCode(HttpStatus.OK)
+  createProvider(
+    @Param() params: Record<string, string>,
+    @Body() dto: CreateSpaceProviderDto,
+  ) {
+    const { server } = this.resolveSpace(params);
+    if (!server) return { ok: false, message: '服务器不存在' };
+
+    const provider = this.providers.create({
+      // 归属强制绑定到当前服务器，不接受客户端指定
+      ownerType: 'space',
+      ownerId: server.serverId,
+      name: dto.name,
+      appId: dto.appId,
+      appCertificate: dto.appCertificate,
+      tokenExpireSec: dto.tokenExpireSec,
+      enabled: dto.enabled,
+      note: dto.note,
+    });
+    return { ok: true, provider };
+  }
+
+  @Put(['server/:serverId/providers/:id', 'spaces/:platform/:externalId/providers/:id'])
+  updateProvider(
+    @Param() params: Record<string, string>,
+    @Body() dto: UpdateSpaceProviderDto,
+  ) {
+    const owned = this.resolveOwnedProvider(params);
+    if ('error' in owned) return owned.error;
+
+    const updated = this.providers.update(params.id, dto);
+    if (!updated) return { ok: false, message: 'Provider 不存在' };
+    return { ok: true, provider: updated };
+  }
+
+  @Delete(['server/:serverId/providers/:id', 'spaces/:platform/:externalId/providers/:id'])
+  removeProvider(@Param() params: Record<string, string>) {
+    const owned = this.resolveOwnedProvider(params);
+    if ('error' in owned) return owned.error;
+    return this.providers.remove(params.id);
+  }
+
+  /** 解析目标 Provider 并确认它属于当前服务器。 */
+  private resolveOwnedProvider(
+    params: Record<string, string>,
+  ): { provider: ReturnType<AgoraProviderService['getForAdmin']> } | { error: { ok: false; message: string } } {
+    const { server } = this.resolveSpace(params);
+    if (!server) return { error: { ok: false, message: '服务器不存在' } };
+
+    const provider = this.providers.getForAdmin(params.id);
+    if (!provider || provider.ownerType !== 'space' || provider.ownerId !== server.serverId) {
+      return { error: { ok: false, message: 'Provider 不存在或不属于该服务器' } };
+    }
+    return { provider };
   }
 }

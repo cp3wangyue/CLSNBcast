@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import {
   AgoraProviderHealthStatus,
@@ -85,12 +85,18 @@ export interface AgoraProviderUpdateRequest {
   note?: string;
 }
 
-export class AgoraProviderValidationError extends Error {
+/**
+ * Provider 入参校验失败。
+ *
+ * 直接继承 `BadRequestException`，这样任何 controller 抛出来都会自动变成
+ * 带 `{message, code}` 的 400，无需在每个接口里写 try/catch。
+ */
+export class AgoraProviderValidationError extends BadRequestException {
   constructor(
     readonly code: string,
     message: string,
   ) {
-    super(message);
+    super({ message, code });
     this.name = 'AgoraProviderValidationError';
   }
 }

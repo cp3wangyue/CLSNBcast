@@ -14,6 +14,11 @@ import {
 import { DatabaseService } from '../database/database.service';
 import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
+import { AgoraProviderService } from '../agora/agora-provider.service';
+import {
+  CreateAgoraProviderDto,
+  UpdateAgoraProviderDto,
+} from '../agora/agora-provider.dto';
 import {
   SuperAdminLoginDto,
   UpdateGlobalConfigDto,
@@ -38,7 +43,10 @@ export class SuperAdminController {
   private readonly tokenSecret: string;
   private readonly tokenTtlSec = 7 * 24 * 3600;
 
-  constructor(private readonly db: DatabaseService) {
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly providers: AgoraProviderService,
+  ) {
     const pwd = process.env.SUPER_ADMIN_PASSWORD!;
     this.superPasswordHash = bcrypt.hashSync(pwd, 10);
     this.tokenSecret = pwd;
@@ -351,5 +359,60 @@ export class SuperAdminController {
   deleteSession(@Param('id') id: string) {
     const ok = this.db.deleteSession(id);
     return { ok };
+  }
+
+  // ===== Agora Providers =====
+  //
+  // 所有响应都走 `AgoraProviderAdminView`，只包含 `hasAppCertificate` /
+  // `hasCustomerSecret` 布尔值。明文凭证**没有任何接口可以读回**，
+  // 只能由 Token 签发与健康检查在服务端内部使用。
+
+  @Get('providers')
+  listProviders() {
+    return this.providers.listForAdmin();
+  }
+
+  @Get('providers/:id')
+  getProvider(@Param('id') id: string) {
+    const provider = this.providers.getForAdmin(id);
+    if (!provider) return { ok: false, message: 'Provider 不存在' };
+    return provider;
+  }
+
+  @Post('providers')
+  @HttpCode(HttpStatus.OK)
+  createProvider(@Body() dto: CreateAgoraProviderDto) {
+    return { ok: true, provider: this.providers.create(this.toCreateRequest(dto)) };
+  }
+
+  @Put('providers/:id')
+  updateProvider(@Param('id') id: string, @Body() dto: UpdateAgoraProviderDto) {
+    const updated = this.providers.update(id, dto);
+    if (!updated) return { ok: false, message: 'Provider 不存在' };
+    return { ok: true, provider: updated };
+  }
+
+  @Delete('providers/:id')
+  removeProvider(@Param('id') id: string) {
+    return this.providers.remove(id);
+  }
+
+  private toCreateRequest(dto: CreateAgoraProviderDto) {
+    return {
+      ownerType: dto.ownerType,
+      ownerId: dto.ownerId,
+      name: dto.name,
+      appId: dto.appId,
+      appCertificate: dto.appCertificate,
+      customerId: dto.customerId ?? null,
+      customerSecret: dto.customerSecret ?? null,
+      enabled: dto.enabled,
+      priority: dto.priority,
+      tokenExpireSec: dto.tokenExpireSec,
+      monthlyQuotaStandardMinutes: dto.monthlyQuotaStandardMinutes ?? null,
+      quotaEnforced: dto.quotaEnforced,
+      allowedPresetIds: dto.allowedPresetIds ?? null,
+      note: dto.note,
+    };
   }
 }

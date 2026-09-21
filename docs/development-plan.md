@@ -145,10 +145,23 @@ npm run verify        # = typecheck + build + test
 - [x] **端到端验证（真实 DI 容器 + 真实数据库）**：16 项断言全部通过 —— 存量明文凭证被迁移并清空、
   证书可解密、管理端视图无明文、会话绑定 Provider 并快照 App ID、发布/观众端均可签发、
   **改 App ID 后活跃会话被拒绝且提示面向用户**、新会话使用新 App ID 正常工作
-- [ ] **1-5 管理端 API 与 UI**
-  - [ ] 超管：Provider 全量 CRUD、优先级、quota 配置
-  - [ ] 服务器管理员：为自身 space 配置 BYOK
-  - [ ] **任何响应都不得返回明文证书**（沿用现有 `'******'` 掩码约定）
+- [x] **1-5 管理端 API**（前端 UI 见下一项）
+  - [x] 超管 `/api/super/providers`：list / get / create / update / delete，可配 ownerType 三态、
+        priority、tokenExpireSec、quota（含 `quotaEnforced`）、`allowedPresetIds`、note
+  - [x] 频道主 `/api/spaces/:platform/:externalId/providers`（含 `/api/server/:serverId` 旧路径别名）：
+        list / create / update / delete，仅限本服务器
+  - [x] **任何响应都不返回明文凭证**：统一走 `AgoraProviderAdminView`，只有
+        `hasAppCertificate` / `hasCustomerSecret` 布尔值；明文没有任何读回接口
+  - [x] 🔒 频道主创建时**服务端强制** `ownerType='space'` + `ownerId=该服务器`，
+        请求里伪造这两个字段不生效（否则可越权创建平台池 Provider，占用我们的声网账号）；
+        DTO 里也刻意不声明这两个字段，配合 `ValidationPipe` 的 `whitelist` 双重拦截
+  - [x] 🔒 频道主改/删前校验目标 Provider 确属本服务器，阻断按 ID 越权操作他人凭证（IDOR）
+  - [x] `AgoraProviderValidationError` 改为继承 `BadRequestException`，
+        校验失败自动变成带 `{message, code}` 的 400，接口层无需 try/catch
+  - [x] 单测 21 个 + **真实 HTTP 验证 20 项**：三组新路由均受鉴权保护（无 token 401）、
+        超管 CRUD 正常且响应无明文、频道主伪造 ownerType 被强制改写、跨角色访问 403、
+        IDOR 被阻断、删除被会话引用的 Provider 被拒绝
+  - [ ] 前端 UI：超管 Provider 管理页；服务器管理页的 Agora 配置改为「选 Provider / 新建 BYOK」
   - [ ] 前端：超管 Provider 管理页；服务器管理页的 Agora 配置改为选 Provider 或新建 BYOK
 - [ ] **1-6 健康检查与用量汇总**
   - [ ] 健康检查任务：离线校验（可解密 + 可试签 token）永远执行；有 Customer 凭证时叠加官方 API
