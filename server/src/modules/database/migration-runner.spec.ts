@@ -41,6 +41,11 @@ const stub = (version: number, name = `m${version}`): Migration => ({
   up: () => undefined,
 });
 
+// 从注册表推导期望值，而不是写死迁移列表 —— 否则每加一个迁移都要改一遍这些断言。
+const ALL_APPLIED = MIGRATIONS.map((m) => ({ version: m.version, name: m.name }));
+const ALL_VERSIONS = MIGRATIONS.map((m) => m.version);
+const MAX_VERSION = Math.max(...ALL_VERSIONS);
+
 // ===== 注册表 =====
 
 describe('MIGRATIONS 注册表', () => {
@@ -60,16 +65,16 @@ describe('MIGRATIONS 注册表', () => {
 // ===== 新库 =====
 
 describe('runMigrations — 新库', () => {
-  it('应用 baseline 并记录 version 1', () => {
+  it('应用全部已注册迁移并逐条记录', () => {
     const db = freshDb();
     const logs: string[] = [];
     const result = runMigrations(db, MIGRATIONS, (m) => logs.push(m));
 
-    expect(result.applied).toEqual([{ version: 1, name: 'baseline' }]);
+    expect(result.applied).toEqual(ALL_APPLIED);
     expect(result.alreadyApplied).toBe(0);
-    expect(result.schemaVersion).toBe(1);
+    expect(result.schemaVersion).toBe(MAX_VERSION);
     expect(result.unknownVersions).toEqual([]);
-    expect(appliedVersions(db)).toEqual([1]);
+    expect(appliedVersions(db)).toEqual(ALL_VERSIONS);
     expect(logs.some((l) => l.includes('Applying migration 1: baseline'))).toBe(true);
   });
 
@@ -86,6 +91,7 @@ describe('runMigrations — 新库', () => {
         'notice_targets',
         'kook_webhook_events',
         'kook_webhook_effects',
+        'agora_providers',
         'schema_migrations',
       ]),
     );
@@ -157,8 +163,49 @@ describe('runMigrations — 新库', () => {
         'last_viewer_at',
         'publisher_client_id',
         'low_latency',
+        // 迁移 002：Provider 绑定。这两列不在 ALLOWED_SESSION_COLS 里，只能通过
+        // bindSessionProvider() 写入一次，用于保证同一 Session 的 App ID 不被中途替换。
+        'provider_id',
+        'agora_app_id',
       ]),
     );
+  });
+
+  it('agora_providers 列齐全（含加密列与可空配额）', () => {
+    const db = freshDb();
+    runMigrations(db, MIGRATIONS);
+    expect(columnNames(db, 'agora_providers')).toEqual(
+      expect.arrayContaining([
+        'id',
+        'owner_type',
+        'owner_id',
+        'name',
+        'app_id',
+        'app_certificate_enc',
+        'customer_id',
+        'customer_secret_enc',
+        'enabled',
+        'priority',
+        'token_expire_sec',
+        'health_status',
+        'health_checked_at',
+        'health_message',
+        'monthly_quota_standard_minutes',
+        'quota_enforced',
+        'estimated_usage_standard_minutes',
+        'usage_period_key',
+        'last_used_at',
+        'allowed_preset_ids',
+        'note',
+        'created_at',
+        'updated_at',
+      ]),
+    );
+
+    // 配额列必须可空（不写死 10000），且默认就是 NULL
+    const info = db.prepare('PRAGMA table_info(agora_providers)').all() as any[];
+    const quotaCol = info.find((c) => c.name === 'monthly_quota_standard_minutes');
+    expect(quotaCol.notnull).toBe(0);
   });
 
   it('建立全部索引，含唯一索引 idx_servers_platform_external_id', () => {
@@ -218,9 +265,9 @@ describe('runMigrations — 幂等', () => {
     const second = runMigrations(db, MIGRATIONS);
 
     expect(second.applied).toEqual([]);
-    expect(second.alreadyApplied).toBe(1);
-    expect(second.schemaVersion).toBe(1);
-    expect(appliedVersions(db)).toEqual([1]);
+    expect(second.alreadyApplied).toBe(MIGRATIONS.length);
+    expect(second.schemaVersion).toBe(MAX_VERSION);
+    expect(appliedVersions(db)).toEqual(ALL_VERSIONS);
   });
 
   it('重复运行不会重复播种公告', () => {
@@ -255,8 +302,8 @@ describe('runMigrations — 存量库接管', () => {
 
     // 4. 用新框架接管
     const result = runMigrations(db, MIGRATIONS);
-    expect(result.applied).toEqual([{ version: 1, name: 'baseline' }]);
-    expect(appliedVersions(db)).toEqual([1]);
+    expect(result.applied).toEqual(ALL_APPLIED);
+    expect(appliedVersions(db)).toEqual(ALL_VERSIONS);
 
     // 5. 数据仍在
     expect((db.prepare('SELECT guild_name FROM servers WHERE server_id=?').get('123') as any).guild_name).toBe('测试服务器');

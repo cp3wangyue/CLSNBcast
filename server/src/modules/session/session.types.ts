@@ -40,6 +40,13 @@ export interface ShareSession {
   publisherClientId?: string;
   /** true=低延迟模式(rtc/互动直播)，false=极速直播(默认) */
   lowLatency: boolean;
+  /**
+   * 创建时固定选定的 Agora Provider，此后**不可修改**。
+   * 空串表示未绑定（迁移 002 之前的旧记录，或尚未接入 Provider 的调用路径）。
+   */
+  providerId: string;
+  /** 创建时的 App ID 快照，用于校验 Provider 的 App ID 是否被中途改动。 */
+  agoraAppId: string;
 }
 
 // ===== 声网新版计费模型（2024年7月起）标准时长折算系数 =====

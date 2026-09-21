@@ -72,7 +72,11 @@ npm run verify        # = typecheck + build + test
 - [x] 确认 `server/dist/main.js` 存在，且**连续三次构建**都产出完整 `dist`（47 个 js、11 个模块）
 - [x] 用真实 Nest 模块图启动验证四种密钥场景：未设密钥可启动、hex/base64 密钥可用且往返正确、
       非法密钥 fail-fast 退出码非 0
-- [ ] Phase 0 全部完成后：删除 `data/` 后启动，确认新库结构与原有一致
+- [x] 删除 `data/` 后启动：新库结构完整（10 张表含 `schema_migrations`），全部 HTTP 端点正常
+      （`/`、favicon、`/api/notices`、`/api/meta/admin-migration`、SPA 回退均 200，
+      未鉴权的 `/api/super/config` 正确 401）
+
+**Phase 0 已完成**（commit `2532f84` / `c23177a` / `b5a8e4f`）。
 
 ### commit 划分
 
@@ -86,16 +90,27 @@ npm run verify        # = typecheck + build + test
 
 ### 任务
 
-- [ ] **1-1 Provider 表与加密**
-  - [ ] migration：建 `agora_providers` 表（[data-model-design.md](./data-model-design.md) 3.1）
-  - [ ] `AgoraProviderRepository`（CRUD）
-  - [ ] `AgoraProviderService`（业务逻辑 + 加密接线）
-  - [ ] 单测：owner 三态、优先级排序、quota 字段可空
+- [x] **1-1 Provider 表与加密**
+  - [x] migration `002-agora-providers`：建 `agora_providers` 表（[data-model-design.md](./data-model-design.md) 3.1）
+  - [x] 同迁移给 `sessions` 加 `provider_id` + `agora_app_id`（**故意不加入 `ALLOWED_SESSION_COLS`**，
+        唯一写入路径是新增的 `bindSessionProvider()`，它用 `WHERE provider_id = ''` 保证只能写一次，
+        重绑会被拒绝并告警）
+  - [x] `DatabaseService` 提供 `agora_providers` 的行级 CRUD（密文原样存取，**数据层不感知加密**）
+  - [x] `AgoraProviderService`：**加解密只在这里发生**；管理端视图只暴露 `hasAppCertificate` /
+        `hasCustomerSecret` 布尔值，明文秘密只能经 `getWithSecrets()` 取得（仅供签发与健康检查）
+  - [x] `onModuleInit` 接入 `SecretCryptoService.assertUsableForExistingSecrets()` 启动门禁
+  - [x] 拒绝删除已被会话引用的 Provider（避免账本与排查出现悬空引用），要停用请改为 `enabled=false`
+  - [x] 顺带：`DatabaseService` 支持 `DATA_DIR` 覆盖数据目录（测试隔离用，部署时也可指定）
+  - [x] 单测 46 个：owner 三态、优先级排序、quota 可空、14 项校验、证书确实加密落库、
+        管理端视图序列化后不含明文、更新时 `undefined` 语义保持原证书、主密钥不匹配时解密抛错、
+        启动门禁三态
 - [ ] **1-2 存量凭证迁移**
-  - [ ] migration：把每个配了 `agora_app_id` + `agora_app_certificate` 的服务器，转成 `owner_type='space'` 的 provider 行（证书加密）
+  - [ ] 把每个配了 `agora_app_id` + `agora_app_certificate` 的服务器，转成 `owner_type='space'`
+        的 provider 行（证书加密）。**放在 `AgoraProviderService.onModuleInit` 而非 migration**：
+        它需要加密服务，且必须能在「未配置密钥」时安全跳过 —— migration 是纯 DB 函数，
+        不应依赖运行时服务
   - [ ] 清空 `servers.agora_app_certificate`（明文消失）
-  - [ ] `sessions` 加 `provider_id` + `agora_app_id` 两列并回填（**注意五处联动**，见 [data-model-design.md](./data-model-design.md) 5.4；这两列**故意不加**入 `ALLOWED_SESSION_COLS`）
-  - [ ] 迁移单测：造一个含明文的旧库，跑迁移后确认密文写入、明文清空、会话绑定正确
+  - [ ] 回填存量 `sessions.provider_id` / `agora_app_id`
 - [ ] **1-3 Token 签发改造（修复 App ID 漂移）**
   - [ ] `generateToken(session, uid, role)` 取代 `generateToken(channel, uid, role, serverId)`
   - [ ] App ID 一致性断言 + `PROVIDER_APPID_CHANGED` 错误码

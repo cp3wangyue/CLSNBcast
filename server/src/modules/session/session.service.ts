@@ -64,6 +64,8 @@ export class SessionService implements OnModuleInit {
       lastViewerAt: row.lastViewerAt,
       publisherClientId: row.publisherClientId || undefined,
       lowLatency: !!row.lowLatency,
+      providerId: row.providerId || '',
+      agoraAppId: row.agoraAppId || '',
     };
   }
 
@@ -95,6 +97,8 @@ export class SessionService implements OnModuleInit {
       lastViewerAt: session.lastViewerAt,
       publisherClientId: session.publisherClientId || null,
       lowLatency: session.lowLatency ? 1 : 0,
+      providerId: session.providerId || '',
+      agoraAppId: session.agoraAppId || '',
     };
   }
 
@@ -154,6 +158,10 @@ export class SessionService implements OnModuleInit {
       graceReason: null,
       lastViewerAt: null,
       lowLatency: false,
+      // Provider 绑定由 resolveForSession 决定，在 Phase 1-2 接入。
+      // 在此之前保持未绑定（providerId 为空），Token 签发仍走原有的 serverId 路径。
+      providerId: '',
+      agoraAppId,
     };
 
     const serverId = params.serverId || params.guildId || '';

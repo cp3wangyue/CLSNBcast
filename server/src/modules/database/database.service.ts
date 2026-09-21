@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import Database from 'better-sqlite3';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { randomBytes } from 'crypto';
 import { getDefaultQualityBitrates, QualityBitrateConfig } from '../session/session.types';
@@ -130,6 +130,76 @@ export interface ServerSession {
   lastViewerAt: number | null;
   publisherClientId: string | null;
   lowLatency: number; // 0=极速直播(默认)，1=低延迟模式(rtc)
+  /**
+   * 创建时固定选定的 Agora Provider。
+   *
+   * ⚠️ 与 `agoraAppId` 一起构成「同一 Session 必须使用同一个 App ID」的不变量载体，
+   * **刻意不加入 `ALLOWED_SESSION_COLS`**，因此 `updateSession` 无法修改它们。
+   * 唯一写入路径是 `bindSessionProvider()`，只在会话创建时调用一次。
+   */
+  providerId: string;
+  /** 创建时的 App ID 快照。签发 Token 前会与 Provider 当前 App ID 比对，不一致就拒绝。 */
+  agoraAppId: string;
+}
+
+// ===== Agora Provider =====
+
+/** Provider 归属：平台全局池 / 某个 KOOK 服务器自带 / 用户 BYOK。 */
+export type AgoraProviderOwnerType = 'platform' | 'space' | 'user';
+
+export type AgoraProviderHealthStatus = 'unknown' | 'healthy' | 'degraded' | 'unhealthy';
+
+/**
+ * `agora_providers` 表的一行。
+ *
+ * 注意 `appCertificateEnc` / `customerSecretEnc` 是**密文**：数据层不感知加密，
+ * 只负责原样存取。加解密由 `AgoraProviderService` 统一负责，明文只在那一个服务里出现。
+ */
+export interface AgoraProviderRecord {
+  id: string;
+  ownerType: AgoraProviderOwnerType;
+  ownerId: string;
+  name: string;
+  appId: string;
+  appCertificateEnc: string;
+  customerId: string | null;
+  customerSecretEnc: string | null;
+  enabled: number;
+  priority: number;
+  tokenExpireSec: number;
+  healthStatus: AgoraProviderHealthStatus;
+  healthCheckedAt: number | null;
+  healthMessage: string;
+  /** NULL = 不限量 */
+  monthlyQuotaStandardMinutes: number | null;
+  quotaEnforced: number;
+  estimatedUsageStandardMinutes: number;
+  usagePeriodKey: string;
+  lastUsedAt: number | null;
+  /** JSON 数组字符串；null = 不限制可用画质 */
+  allowedPresetIds: string | null;
+  note: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 新建 Provider 的入参（密文字段由上层加密后传入）。 */
+export interface AgoraProviderCreateInput {
+  id: string;
+  ownerType: AgoraProviderOwnerType;
+  ownerId?: string;
+  name: string;
+  appId: string;
+  appCertificateEnc: string;
+  customerId?: string | null;
+  customerSecretEnc?: string | null;
+  enabled?: boolean;
+  priority?: number;
+  tokenExpireSec?: number;
+  monthlyQuotaStandardMinutes?: number | null;
+  quotaEnforced?: boolean;
+  allowedPresetIds?: string[] | null;
+  note?: string;
 }
 
 // ===== Service =====
@@ -140,7 +210,10 @@ export class DatabaseService implements OnModuleDestroy {
   private readonly db: Database.Database;
 
   constructor() {
-    const dataDir = join(process.cwd(), 'data');
+    // 数据目录可用 DATA_DIR 覆盖：测试用临时目录隔离，部署时也可把数据放到挂载卷的任意位置。
+    const dataDir = process.env.DATA_DIR
+      ? resolve(process.env.DATA_DIR)
+      : join(process.cwd(), 'data');
     if (!existsSync(dataDir)) {
       mkdirSync(dataDir, { recursive: true });
     }
@@ -294,6 +367,9 @@ export class DatabaseService implements OnModuleDestroy {
       lastViewerAt: row.last_viewer_at,
       publisherClientId: row.publisher_client_id,
       lowLatency: row.low_latency ?? 0,
+      // 旧记录（迁移 002 之前）没有这两列，回退为空串表示「未绑定 Provider」
+      providerId: row.provider_id ?? '',
+      agoraAppId: row.agora_app_id ?? '',
     };
   }
 
@@ -475,6 +551,163 @@ export class DatabaseService implements OnModuleDestroy {
     this.logger.log(`Deleted server ${serverId} and its sessions/events`);
   }
 
+  // ===== Agora Providers =====
+
+  /** 将数据库行（下划线字段名）映射为 AgoraProviderRecord（驼峰字段名） */
+  private mapProviderRow(row: any): AgoraProviderRecord {
+    return {
+      id: row.id,
+      ownerType: row.owner_type,
+      ownerId: row.owner_id ?? '',
+      name: row.name,
+      appId: row.app_id,
+      appCertificateEnc: row.app_certificate_enc ?? '',
+      customerId: row.customer_id ?? null,
+      customerSecretEnc: row.customer_secret_enc ?? null,
+      enabled: row.enabled ?? 0,
+      priority: row.priority ?? 100,
+      tokenExpireSec: row.token_expire_sec ?? 3600,
+      healthStatus: row.health_status ?? 'unknown',
+      healthCheckedAt: row.health_checked_at ?? null,
+      healthMessage: row.health_message ?? '',
+      monthlyQuotaStandardMinutes: row.monthly_quota_standard_minutes ?? null,
+      quotaEnforced: row.quota_enforced ?? 0,
+      estimatedUsageStandardMinutes: row.estimated_usage_standard_minutes ?? 0,
+      usagePeriodKey: row.usage_period_key ?? '',
+      lastUsedAt: row.last_used_at ?? null,
+      allowedPresetIds: row.allowed_preset_ids ?? null,
+      note: row.note ?? '',
+      createdAt: row.created_at ?? 0,
+      updatedAt: row.updated_at ?? 0,
+    };
+  }
+
+  getProvider(id: string): AgoraProviderRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM agora_providers WHERE id = ?').get(id) as any;
+    return row ? this.mapProviderRow(row) : undefined;
+  }
+
+  listProviders(): AgoraProviderRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM agora_providers ORDER BY priority ASC, created_at ASC')
+      .all() as any[];
+    return rows.map((row) => this.mapProviderRow(row));
+  }
+
+  /** 按归属列出 Provider。`ownerType` 省略时返回全部。 */
+  listProvidersByOwner(ownerType?: AgoraProviderOwnerType, ownerId?: string): AgoraProviderRecord[] {
+    if (!ownerType) return this.listProviders();
+    const rows = ownerId === undefined
+      ? (this.db
+          .prepare('SELECT * FROM agora_providers WHERE owner_type = ? ORDER BY priority ASC, created_at ASC')
+          .all(ownerType) as any[])
+      : (this.db
+          .prepare(
+            'SELECT * FROM agora_providers WHERE owner_type = ? AND owner_id = ? ORDER BY priority ASC, created_at ASC',
+          )
+          .all(ownerType, ownerId) as any[]);
+    return rows.map((row) => this.mapProviderRow(row));
+  }
+
+  /** 所有 Provider 的密文字段，供启动门禁检查「库里是否已有密文」。 */
+  listProviderCiphertexts(): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT app_certificate_enc, customer_secret_enc FROM agora_providers`,
+      )
+      .all() as any[];
+    const values: string[] = [];
+    for (const row of rows) {
+      if (row.app_certificate_enc) values.push(row.app_certificate_enc);
+      if (row.customer_secret_enc) values.push(row.customer_secret_enc);
+    }
+    return values;
+  }
+
+  createProvider(input: AgoraProviderCreateInput): AgoraProviderRecord {
+    const now = Date.now();
+    this.db.prepare(`
+      INSERT INTO agora_providers (
+        id, owner_type, owner_id, name, app_id, app_certificate_enc,
+        customer_id, customer_secret_enc, enabled, priority, token_expire_sec,
+        health_status, health_checked_at, health_message,
+        monthly_quota_standard_minutes, quota_enforced,
+        estimated_usage_standard_minutes, usage_period_key, last_used_at,
+        allowed_preset_ids, note, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
+        'unknown', NULL, '',
+        ?, ?,
+        0, '', NULL,
+        ?, ?, ?, ?
+      )
+    `).run(
+      input.id,
+      input.ownerType,
+      input.ownerId ?? '',
+      input.name,
+      input.appId,
+      input.appCertificateEnc,
+      input.customerId ?? null,
+      input.customerSecretEnc ?? null,
+      input.enabled === false ? 0 : 1,
+      input.priority ?? 100,
+      input.tokenExpireSec ?? 3600,
+      input.monthlyQuotaStandardMinutes ?? null,
+      input.quotaEnforced ? 1 : 0,
+      input.allowedPresetIds ? JSON.stringify(input.allowedPresetIds) : null,
+      input.note ?? '',
+      now,
+      now,
+    );
+    return this.getProvider(input.id)!;
+  }
+
+  /** 可更新列。`owner_type` / `owner_id` 是身份，不在其中；`id` 由主键保护。 */
+  private readonly ALLOWED_PROVIDER_COLS = new Set([
+    'name', 'app_id', 'app_certificate_enc',
+    'customer_id', 'customer_secret_enc',
+    'enabled', 'priority', 'token_expire_sec',
+    'health_status', 'health_checked_at', 'health_message',
+    'monthly_quota_standard_minutes', 'quota_enforced',
+    'estimated_usage_standard_minutes', 'usage_period_key', 'last_used_at',
+    'allowed_preset_ids', 'note',
+    'updated_at',
+  ]);
+
+  updateProvider(id: string, fields: Partial<AgoraProviderRecord>): void {
+    const sets: string[] = [];
+    const values: any[] = [];
+    for (const [key, val] of Object.entries(fields)) {
+      if (key === 'id') continue;
+      const col = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+      if (!this.ALLOWED_PROVIDER_COLS.has(col)) {
+        this.logger.warn(`updateProvider: rejected unknown column "${col}"`);
+        continue;
+      }
+      sets.push(`${col} = ?`);
+      values.push(val);
+    }
+    if (sets.length === 0) return;
+    sets.push('updated_at = ?');
+    values.push(Date.now());
+    values.push(id);
+    this.db.prepare(`UPDATE agora_providers SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  deleteProvider(id: string): boolean {
+    return this.db.prepare('DELETE FROM agora_providers WHERE id = ?').run(id).changes > 0;
+  }
+
+  /** 有多少个会话绑定在这个 Provider 上（删除前的安全检查）。 */
+  countSessionsByProvider(providerId: string): number {
+    const row = this.db
+      .prepare('SELECT COUNT(*) AS c FROM sessions WHERE provider_id = ?')
+      .get(providerId) as any;
+    return row?.c ?? 0;
+  }
+
   // ===== Server Events =====
 
   /** 记录服务器事件 */
@@ -538,14 +771,14 @@ export class DatabaseService implements OnModuleDestroy {
         total_viewer_joins, viewer_duration_ms, quality, card_message_id, manual_created,
         created_at, started_at, ended_at, duration_ms, last_heartbeat,
         grace_started_at, grace_reason, last_viewer_at, publisher_client_id,
-        low_latency
+        low_latency, provider_id, agora_app_id
       ) VALUES (
         ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
-        ?
+        ?, ?, ?
       )
     `).run(
       session.id, session.token, session.channel, session.serverId,
@@ -559,7 +792,30 @@ export class DatabaseService implements OnModuleDestroy {
       session.graceStartedAt, session.graceReason,
       session.lastViewerAt, session.publisherClientId,
       session.lowLatency ?? 0,
+      session.providerId ?? '', session.agoraAppId ?? '',
     );
+  }
+
+  /**
+   * 绑定会话的 Provider 与 App ID 快照。**只在会话创建时调用一次。**
+   *
+   * 这是这两个字段的唯一写入路径：它们不在 `ALLOWED_SESSION_COLS` 里，
+   * 所以 `updateSession()` 无法修改，从数据层保证「同一 Session 的 publisher 与
+   * 所有 subscriber 始终使用同一个 Provider / App ID / Channel」。
+   */
+  bindSessionProvider(sessionId: string, providerId: string, agoraAppId: string): void {
+    const result = this.db
+      .prepare(
+        `UPDATE sessions SET provider_id = ?, agora_app_id = ?
+         WHERE id = ? AND provider_id = ''`,
+      )
+      .run(providerId, agoraAppId, sessionId);
+    if (result.changes !== 1) {
+      // 已经绑定过 → 说明有人试图在活跃会话上换 Provider。明确拒绝而不是静默覆盖。
+      this.logger.warn(
+        `bindSessionProvider: refused to rebind session ${sessionId} (already bound or not found)`,
+      );
+    }
   }
 
   private readonly ALLOWED_SESSION_COLS = new Set([
