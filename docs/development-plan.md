@@ -183,7 +183,7 @@ npm run verify        # = typecheck + build + test
         `platform:-` 与 `space:guild-ui`（**归属由服务端强制写入**），证书均为 `v1:` 密文信封、
         无明文；同时验证改名后的 localStorage key（`clsnbcast_super_token` /
         `clsnbcast_space_kook_*`）端到端可用
-  - [ ] 前端：超管 Provider 管理页；服务器管理页的 Agora 配置改为选 Provider 或新建 BYOK
+  - [x] 前端：超管 Provider 管理页；服务器管理页的 Agora 配置改为「选 Provider / 新建 BYOK」
 - [x] **1-6 健康检查**（用量汇总属 Phase 2，需要账本表）
   - [x] **离线检查**（免费）：能解密证书 + 能签出 Token ⇒ `healthy`；
         否则 `unhealthy` 并写入可操作的原因。启动时跑一次，之后每 30 分钟一次

@@ -179,23 +179,18 @@ export class KookService implements OnModuleInit {
     this.db.kickServer(guildId);
   }
 
-  /** Get server config for a guild (guildId is snowflake ID from events) */
+  /**
+   * Get server config for a guild (guildId is snowflake ID from events).
+   *
+   * 只返回机器人真正用到的字段。原先这里还拼了 `openId` / `agora` / `session` 三个
+   * 无人消费的子对象 —— 其中 `agora` 会把 App Certificate 复制进内存，
+   * 且 `JSON.parse(allowedQualities)` 在数据异常时会抛错。既然没有任何消费者，直接删掉。
+   * 凭证自 Phase 1 起由 Provider 管理，机器人层不再需要感知它们。
+   */
   private getServerConfig(guildId: string) {
     const server = this.db.getServer(guildId);
     if (!server || !server.bound || server.status !== 'active') return null;
     return {
-      openId: server.openId,  // 公开 ID（用于面板显示）
-      agora: {
-        appId: server.agoraAppId,
-        appCertificate: server.agoraAppCertificate,
-        tokenExpireSec: server.agoraTokenExpireSec,
-        allowedQualities: JSON.parse(server.allowedQualities),
-      },
-      session: {
-        idleTimeoutSec: server.idleTimeoutSec,
-        heartbeatIntervalSec: server.heartbeatIntervalSec,
-        noViewerTimeoutSec: server.noViewerTimeoutSec,
-      },
       triggerWords: server.triggerWords,
       publicDomain: this.db.getGlobalConfig().publicDomain,
     };
