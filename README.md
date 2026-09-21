@@ -145,12 +145,18 @@ web/src/
 ```bash
 npm install            # 安装 server + web 两个 workspace 的依赖
 
-# 开发模式
-npm run build:web      # 构建前端
-npm run build:server   # 构建后端
-npm run build          # 两者都构建
+# 验证（提交前必跑，等价于 typecheck + build + test）
+npm run verify
+
+# 单独运行
+npm run typecheck      # server: tsc --noEmit ｜ web: tsc -b
+npm run test           # vitest（两个 workspace）
+npm run build          # 构建前端与后端产物
 npm start              # 以生产模式启动（需先 build）
 ```
+
+单元测试用 **vitest**，测试文件与被测模块同目录，命名为 `*.spec.ts`。
+当前只覆盖不依赖 NestJS DI 反射的纯逻辑模块；`server/tsconfig.build.json` 已排除 `**/*spec.ts`，因此测试文件不会进入构建产物。
 
 本地开发时前端 Vite 会把 `/api` 代理到 `http://localhost:3520`，可用 `VITE_API_TARGET` 覆盖。
 
