@@ -1,0 +1,355 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  HttpCode,
+  HttpStatus,
+  BadRequestException,
+} from '@nestjs/common';
+import { DatabaseService } from '../database/database.service';
+import * as bcrypt from 'bcryptjs';
+import { createHmac } from 'crypto';
+import {
+  SuperAdminLoginDto,
+  UpdateGlobalConfigDto,
+  UpdateServerDto,
+} from './super-admin.dto';
+import {
+  getVideoCoefficient,
+  QUALITY_PRESETS,
+  STANDARD_MINUTE_PRICE,
+  type QualityBitrateConfig,
+} from '../session/session.types';
+
+/** 用户 ID 脱敏：保留首 3 位和末 4 位 */
+function maskUserId(uid: string): string {
+  if (!uid || uid.length <= 7) return uid;
+  return uid.slice(0, 3) + '****' + uid.slice(-4);
+}
+
+@Controller('api/super')
+export class SuperAdminController {
+  private superPasswordHash: string;
+  private readonly tokenSecret: string;
+  private readonly tokenTtlSec = 7 * 24 * 3600;
+
+  constructor(private readonly db: DatabaseService) {
+    const pwd = process.env.SUPER_ADMIN_PASSWORD!;
+    this.superPasswordHash = bcrypt.hashSync(pwd, 10);
+    this.tokenSecret = pwd;
+  }
+
+  // ===== Auth =====
+
+  @Post('login')
+  @HttpCode(HttpStatus.OK)
+  login(@Body() dto: SuperAdminLoginDto) {
+    if (!bcrypt.compareSync(dto.password, this.superPasswordHash)) {
+      return { ok: false, message: '密码错误' };
+    }
+    const payload = { role: 'super_admin', exp: Math.floor(Date.now() / 1000) + this.tokenTtlSec };
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const sig = createHmac('sha256', this.tokenSecret).update(body).digest('base64url');
+    return { ok: true, token: body + '.' + sig };
+  }
+
+  // ===== Global Config =====
+
+  @Get('config')
+  getConfig() {
+    const cfg = this.db.getGlobalConfig();
+    return {
+      kookBotToken: cfg.kookBotToken ? '******' : '',
+      kookVerifyToken: cfg.kookVerifyToken ? '******' : '',
+      kookEncryptKey: cfg.kookEncryptKey ? '******' : '',
+      publicDomain: cfg.publicDomain,
+      triggerWordLabels: cfg.triggerWordLabels,
+      qualityBitrates: cfg.qualityBitrates,
+      qualityProfiles: QUALITY_PRESETS.map((quality) => ({
+        key: quality.key,
+        label: quality.label,
+        width: quality.width,
+        height: quality.height,
+        frameRate: quality.frameRate,
+        interactiveViewerHourlyRate:
+          getVideoCoefficient(quality.tier, true) * STANDARD_MINUTE_PRICE * 60,
+        liveViewerHourlyRate:
+          getVideoCoefficient(quality.tier, false) * STANDARD_MINUTE_PRICE * 60,
+      })),
+      broadcasterHourlyRate: STANDARD_MINUTE_PRICE * 60,
+    };
+  }
+
+  @Put('config')
+  updateConfig(@Body() dto: UpdateGlobalConfigDto) {
+    if (dto.kookBotToken !== undefined && dto.kookBotToken !== '******') {
+      this.db.setGlobalConfig('kookBotToken', dto.kookBotToken);
+    }
+    if (dto.kookVerifyToken !== undefined && dto.kookVerifyToken !== '******') {
+      this.db.setGlobalConfig('kookVerifyToken', dto.kookVerifyToken);
+    }
+    if (dto.kookEncryptKey !== undefined && dto.kookEncryptKey !== '******') {
+      this.db.setGlobalConfig('kookEncryptKey', dto.kookEncryptKey);
+    }
+    if (dto.publicDomain !== undefined) {
+      this.db.setGlobalConfig('publicDomain', dto.publicDomain);
+    }
+    if (dto.qualityBitrates !== undefined) {
+      const sanitized = this.sanitizeQualityBitrates(dto.qualityBitrates);
+      this.db.setGlobalConfig('qualityBitrates', JSON.stringify(sanitized));
+    }
+    if (dto.triggerWordLabels !== undefined) {
+      const labels = [...new Set(dto.triggerWordLabels.map(word => word.trim()).filter(Boolean))];
+      if (labels.length === 0) throw new BadRequestException('至少保留一个触发词标签');
+      this.db.setTriggerWordLabels(labels);
+    }
+    return { ok: true };
+  }
+
+  private sanitizeQualityBitrates(input: QualityBitrateConfig): QualityBitrateConfig {
+    const result: QualityBitrateConfig = {};
+    for (const quality of QUALITY_PRESETS) {
+      const value = input[quality.key] || {};
+      const bitrateMin = value.bitrateMin;
+      const bitrateMax = value.bitrateMax;
+      for (const [name, bitrate] of Object.entries({ bitrateMin, bitrateMax })) {
+        if (bitrate !== undefined && (!Number.isFinite(bitrate) || bitrate <= 0)) {
+          throw new BadRequestException(`${quality.label} 的 ${name} 必须为正数或留空`);
+        }
+      }
+      if (bitrateMin !== undefined && bitrateMax !== undefined && bitrateMax < bitrateMin) {
+        throw new BadRequestException(`${quality.label} 的最高码率不能低于最低码率`);
+      }
+      result[quality.key] = {
+        ...(bitrateMin !== undefined ? { bitrateMin } : {}),
+        ...(bitrateMax !== undefined ? { bitrateMax } : {}),
+      };
+    }
+    return result;
+  }
+
+  // ===== Server Management =====
+
+  @Get('spaces')
+  listSpaces(@Query('platform') platform?: string) {
+    return this.db.listSpaces(platform || undefined).map((s) => ({
+      spaceId: s.serverId,
+      platform: s.platform,
+      externalId: s.externalId,
+      serverId: s.externalId,
+      openId: s.openId,
+      guildName: s.guildName,
+      ownerId: s.ownerId,
+      ownerUsername: s.ownerUsername,
+      bound: !!s.bound,
+      status: s.status,
+      agoraAppId: s.agoraAppId ? '******' : '',
+      createdAt: s.createdAt,
+    }));
+  }
+
+  @Get('spaces/:platform/:externalId')
+  getSpace(
+    @Param('platform') platform: string,
+    @Param('externalId') externalId: string,
+  ) {
+    const s = this.db.getSpace(platform, externalId);
+    if (!s) return { ok: false, message: '平台空间不存在' };
+    return {
+      spaceId: s.serverId,
+      platform: s.platform,
+      externalId: s.externalId,
+      serverId: s.externalId,
+      openId: s.openId,
+      guildName: s.guildName,
+      ownerId: s.ownerId,
+      ownerUsername: s.ownerUsername,
+      bound: !!s.bound,
+      status: s.status,
+      agoraAppId: s.agoraAppId,
+      agoraAppCertificate: s.agoraAppCertificate ? '******' : '',
+      agoraTokenExpireSec: s.agoraTokenExpireSec,
+      allowedQualities: JSON.parse(s.allowedQualities),
+      enabledTriggerWords: s.triggerWords.split(',').map(word => word.trim()).filter(Boolean),
+      triggerWordLabels: this.db.getGlobalConfig().triggerWordLabels,
+      idleTimeoutSec: s.idleTimeoutSec,
+      heartbeatIntervalSec: s.heartbeatIntervalSec,
+      noViewerTimeoutSec: s.noViewerTimeoutSec,
+      publicDomain: this.db.getGlobalConfig().publicDomain,
+      allowLowLatency: s.allowLowLatency,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    };
+  }
+
+  @Get('spaces/:platform/:externalId/events')
+  getSpaceEvents(
+    @Param('platform') platform: string,
+    @Param('externalId') externalId: string,
+  ) {
+    const space = this.db.getSpace(platform, externalId);
+    return space ? this.db.getServerEvents(space.serverId) : [];
+  }
+
+  @Get('spaces/:platform/:externalId/sessions')
+  getSpaceSessions(
+    @Param('platform') platform: string,
+    @Param('externalId') externalId: string,
+  ) {
+    const space = this.db.getSpace(platform, externalId);
+    if (!space) return [];
+    return this.db.getSessionsByServer(space.serverId).map(s => ({
+      ...s,
+      sharerUserId: maskUserId(s.sharerUserId),
+    }));
+  }
+
+  @Put('spaces/:platform/:externalId')
+  updateSpace(
+    @Param('platform') platform: string,
+    @Param('externalId') externalId: string,
+    @Body() dto: UpdateServerDto,
+  ) {
+    const space = this.db.getSpace(platform, externalId);
+    if (!space) return { ok: false, message: '平台空间不存在' };
+    return this.updateServer(space.serverId, dto);
+  }
+
+  @Delete('spaces/:platform/:externalId')
+  deleteSpace(
+    @Param('platform') platform: string,
+    @Param('externalId') externalId: string,
+  ) {
+    const space = this.db.getSpace(platform, externalId);
+    if (!space) return { ok: false, message: '平台空间不存在' };
+    this.db.deleteServer(space.serverId);
+    return { ok: true };
+  }
+
+  @Get('servers')
+  listServers() {
+    const servers = this.db.listServers();
+    return servers.map((s) => ({
+      serverId: s.serverId,
+      openId: s.openId,
+      guildName: s.guildName,
+      ownerId: s.ownerId,
+      ownerUsername: s.ownerUsername,
+      bound: !!s.bound,
+      status: s.status,
+      agoraAppId: s.agoraAppId ? '******' : '',
+      createdAt: s.createdAt,
+    }));
+  }
+
+  @Get('servers/:id')
+  getServer(@Param('id') id: string) {
+    const s = this.db.getServer(id);
+    if (!s) return { ok: false, message: '服务器不存在' };
+    return {
+      serverId: s.serverId,
+      openId: s.openId,
+      guildName: s.guildName,
+      ownerId: s.ownerId,
+      ownerUsername: s.ownerUsername,
+      bound: !!s.bound,
+      status: s.status,
+      agoraAppId: s.agoraAppId,
+      agoraAppCertificate: s.agoraAppCertificate ? '******' : '',
+      agoraTokenExpireSec: s.agoraTokenExpireSec,
+      allowedQualities: JSON.parse(s.allowedQualities),
+      enabledTriggerWords: s.triggerWords.split(',').map(word => word.trim()).filter(Boolean),
+      triggerWordLabels: this.db.getGlobalConfig().triggerWordLabels,
+      idleTimeoutSec: s.idleTimeoutSec,
+      heartbeatIntervalSec: s.heartbeatIntervalSec,
+      noViewerTimeoutSec: s.noViewerTimeoutSec,
+      publicDomain: this.db.getGlobalConfig().publicDomain,
+      allowLowLatency: s.allowLowLatency,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    };
+  }
+
+  @Get('servers/:id/events')
+  getServerEvents(@Param('id') id: string) {
+    return this.db.getServerEvents(id);
+  }
+
+  @Get('servers/:id/sessions')
+  getServerSessions(@Param('id') id: string) {
+    return this.db.getSessionsByServer(id).map(s => ({
+      ...s,
+      sharerUserId: maskUserId(s.sharerUserId),
+    }));
+  }
+
+  @Put('servers/:id')
+  updateServer(@Param('id') id: string, @Body() dto: UpdateServerDto) {
+    const s = this.db.getServer(id);
+    if (!s) return { ok: false, message: '服务器不存在' };
+
+    const updates: any = {};
+    if (dto.agoraAppId !== undefined) updates.agoraAppId = dto.agoraAppId;
+    if (dto.agoraAppCertificate !== undefined && dto.agoraAppCertificate !== '******') {
+      updates.agoraAppCertificate = dto.agoraAppCertificate;
+    }
+    if (dto.agoraTokenExpireSec !== undefined) updates.agoraTokenExpireSec = dto.agoraTokenExpireSec;
+    if (dto.allowedQualities !== undefined) {
+      const validKeys = new Set(QUALITY_PRESETS.map(quality => quality.key));
+      const allowed = [...new Set(dto.allowedQualities.filter(key => validKeys.has(key)))];
+      if (allowed.length === 0) throw new BadRequestException('至少开放一个有效画质');
+      updates.allowedQualities = JSON.stringify(allowed);
+    }
+    if (dto.enabledTriggerWords !== undefined) {
+      const allowed = new Set(this.db.getGlobalConfig().triggerWordLabels);
+      const enabled = [...new Set(dto.enabledTriggerWords.map(word => word.trim()).filter(word => allowed.has(word)))];
+      if (enabled.length === 0) throw new BadRequestException('至少启用一个触发词标签');
+      updates.triggerWords = enabled.join(',');
+    }
+    if (dto.idleTimeoutSec !== undefined) updates.idleTimeoutSec = dto.idleTimeoutSec;
+    if (dto.heartbeatIntervalSec !== undefined) updates.heartbeatIntervalSec = dto.heartbeatIntervalSec;
+    if (dto.noViewerTimeoutSec !== undefined) updates.noViewerTimeoutSec = dto.noViewerTimeoutSec;
+    if (dto.allowLowLatency !== undefined) updates.allowLowLatency = dto.allowLowLatency;
+
+    this.db.updateServer(id, updates);
+    return { ok: true };
+  }
+
+  @Delete('servers/:id')
+  deleteServer(@Param('id') id: string) {
+    const s = this.db.getServer(id);
+    if (!s) return { ok: false, message: '服务器不存在' };
+    this.db.deleteServer(id);
+    return { ok: true };
+  }
+
+  // ===== Sessions =====
+
+  @Get('sessions')
+  listAllSessions() {
+    return this.db.getAllSessions().map(s => ({
+      ...s,
+      sharerUserId: maskUserId(s.sharerUserId),
+    }));
+  }
+
+  @Get('sessions/server/:serverId')
+  listServerSessions(@Param('serverId') serverId: string) {
+    return this.db.getSessionsByServer(serverId).map(s => ({
+      ...s,
+      sharerUserId: maskUserId(s.sharerUserId),
+    }));
+  }
+
+  @Delete('sessions/:id')
+  @HttpCode(HttpStatus.OK)
+  deleteSession(@Param('id') id: string) {
+    const ok = this.db.deleteSession(id);
+    return { ok };
+  }
+}
