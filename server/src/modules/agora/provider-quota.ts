@@ -1,32 +1,9 @@
 import { AgoraProviderRecord } from '../database/database.service';
+import { DEFAULT_USAGE_TIMEZONE, currentPeriodKey } from '../usage/usage-period';
 
-/** 默认计费周期时区。Phase 3 起可由管理员通过 `quality_config.usage_timezone` 覆盖。 */
-export const DEFAULT_USAGE_TIMEZONE = 'Asia/Shanghai';
-
-/**
- * 计费周期键 `YYYY-MM`。
- *
- * 用 `Intl` 按时区计算，**不能**用 `getMonth()` —— 生产容器通常是 UTC，
- * 直接用本地时间会在月初/月末错一天，导致配额判断用错周期。
- */
-export function currentPeriodKey(
-  timeZone: string = DEFAULT_USAGE_TIMEZONE,
-  now: Date = new Date(),
-): string {
-  try {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-    }).formatToParts(now);
-    const year = parts.find((p) => p.type === 'year')?.value;
-    const month = parts.find((p) => p.type === 'month')?.value;
-    if (year && month) return `${year}-${month}`;
-  } catch {
-    // 时区名非法（例如管理员填错）时退回 UTC，至少保证周期键仍可用
-  }
-  return now.toISOString().slice(0, 7);
-}
+// 周期计算已移到 usage 域（配额依赖用量口径，而非反过来）。
+// 这里重新导出，避免调用方为了拿一个周期键而多一条导入路径。
+export { DEFAULT_USAGE_TIMEZONE, currentPeriodKey };
 
 export interface QuotaState {
   /** 未配置配额（`monthlyQuotaStandardMinutes === null`） */

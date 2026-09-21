@@ -208,6 +208,66 @@ describe('runMigrations — 新库', () => {
     expect(quotaCol.notnull).toBe(0);
   });
 
+  it('用量账本三张表都建好，含 period_key 与未关闭区间索引', () => {
+    const db = freshDb();
+    runMigrations(db, MIGRATIONS);
+
+    expect(tableNames(db)).toEqual(
+      expect.arrayContaining(['usage_events', 'usage_intervals', 'provider_usage_monthly']),
+    );
+
+    expect(columnNames(db, 'usage_events')).toEqual(
+      expect.arrayContaining([
+        'id', 'session_id', 'provider_id', 'server_id', 'role', 'actor_id',
+        'event_type', 'occurred_at', 'tier', 'width', 'height', 'frame_rate',
+        'bitrate_max', 'low_latency', 'detail',
+      ]),
+    );
+
+    expect(columnNames(db, 'usage_intervals')).toEqual(
+      expect.arrayContaining([
+        'id', 'session_id', 'provider_id', 'server_id', 'role', 'actor_id', 'tier',
+        'width', 'height', 'frame_rate', 'bitrate_max', 'low_latency',
+        'billing_model', 'coefficient', 'period_key', 'started_at', 'ended_at',
+        'duration_ms', 'standard_ms', 'closed_reason', 'created_at',
+      ]),
+    );
+
+    expect(columnNames(db, 'provider_usage_monthly')).toEqual(
+      expect.arrayContaining([
+        'provider_id', 'period_key', 'standard_minutes', 'publisher_minutes',
+        'viewer_minutes', 'session_count', 'updated_at',
+      ]),
+    );
+
+    // period_key 是 NOT NULL：周期归属在开启区间时确定，不允许事后为空
+    const intervalCols = db.prepare('PRAGMA table_info(usage_intervals)').all() as any[];
+    expect(intervalCols.find((c) => c.name === 'period_key').notnull).toBe(1);
+    // ended_at 必须可空：NULL 表示区间仍在进行
+    expect(intervalCols.find((c) => c.name === 'ended_at').notnull).toBe(0);
+
+    const indexes = indexNames(db);
+    expect(indexes).toEqual(
+      expect.arrayContaining([
+        'idx_usage_events_session',
+        'idx_usage_events_provider',
+        'idx_usage_intervals_provider',
+        'idx_usage_intervals_period',
+        'idx_usage_intervals_session',
+        'idx_usage_intervals_open',
+      ]),
+    );
+  });
+
+  it('provider_usage_monthly 以 (provider_id, period_key) 为主键', () => {
+    const db = freshDb();
+    runMigrations(db, MIGRATIONS);
+
+    const cols = db.prepare('PRAGMA table_info(provider_usage_monthly)').all() as any[];
+    const pk = cols.filter((c) => c.pk > 0).sort((a, b) => a.pk - b.pk).map((c) => c.name);
+    expect(pk).toEqual(['provider_id', 'period_key']);
+  });
+
   it('建立全部索引，含唯一索引 idx_servers_platform_external_id', () => {
     const db = freshDb();
     runMigrations(db, MIGRATIONS);

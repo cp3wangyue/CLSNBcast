@@ -230,10 +230,30 @@ npm run verify        # = typecheck + build + test
 
 ### 任务
 
-- [ ] **2-1 账本表与 repository**
-  - [ ] migration：`usage_events` + `usage_intervals` + `provider_usage_monthly`（+ 可选 `usage_reconciliation`）
-  - [ ] `UsageLedgerService`（开区间 / 关区间 / 查询 / 汇总）
-  - [ ] 单测：区间开关、重叠区间、未关区间查询
+- [x] **2-1 账本表与 repository**
+  - [x] migration `003-usage-ledger`：`usage_events` + `usage_intervals` + `provider_usage_monthly`
+        （`usage_reconciliation` 留到 2-5 需要时再加，避免先建无人使用的表）
+  - [x] `DatabaseService` 提供行级 CRUD（列映射、插入、按条件更新），与其它表一致；
+        **计费语义不在这一层**
+  - [x] `UsageLedgerService`（开区间 / 关区间 / 会话级收口 / 崩溃恢复 / 观众时长派生 / 月度汇总）
+  - [x] `resolveBillingProfile()`：把「主播按音频、观众按视频档位」的既有口径抽成纯函数，
+        与 `toInfo()` 完全一致；Phase 2-3 换成读配置时只改这一个函数
+  - [x] 周期键 `currentPeriodKey` 从 `agora/provider-quota` 移到 `usage/usage-period`
+        （配额依赖用量口径，依赖方向应当是 quota → usage）
+  - [x] 🔑 **周期键在开启区间时就算好并落库**（`usage_intervals.period_key`），
+        而不是查询时现算 —— 汇总与配额判断因此不必做时区区间换算，
+        也消除了「月首/月末按 UTC 与按 Asia/Shanghai 归属不同」这类边界 bug
+  - [x] 🔒 **重复开区间被拒绝**：同一 (session, role, actor) 已有进行中区间时返回 `undefined` 并告警。
+        重复计费比调用方的自觉更值得防
+  - [x] 🔒 **重复关区间是无害 no-op**：结算 SQL 带 `WHERE ended_at IS NULL`，
+        时长与标准时长在 SQL 内算，避免读-改-写竞态
+  - [x] 崩溃恢复用**最后一次可信活动**（会话最后心跳）兜底，不把宕机时间算成用量
+  - [x] 单测 69 个：区间开关与去重、结算与幂等关闭、档位切换切分区间、
+        观众时长（已关闭 + 进行中实时部分）、崩溃恢复四种边界、月度汇总（含 sessionCount
+        取最大值而非相加、upsert 幂等、跨月不串、时区归属）、系数快照不可变
+  - [x] **端到端验证（真实 DI 容器 + 真实数据库）17 项**：新库建到 v3、**v2 存量库增量升级到 v3
+        且业务数据无损**、账本服务可从 DI 解析、区间开关与去重、周期键落库、
+        汇总产出 4.57 标准分钟并同步到 Provider 配额缓存
 - [ ] **2-2 埋点接入（纯旁路写入）**
   - [ ] 按 [data-model-design.md](./data-model-design.md) 4.5 的表格接线
   - [ ] 口径按已决策：**观众 ACTIVE-only；主播含 GRACE**（保持现状）

@@ -202,6 +202,119 @@ export interface AgoraProviderCreateInput {
   note?: string;
 }
 
+// ===== Usage Ledger =====
+
+export type UsageRole = 'publisher' | 'viewer';
+
+/** 计费模型：互动直播 / 极速直播。同一份时长在两种模式下系数不同。 */
+export type UsageBillingModel = 'interactive' | 'ultra_low_latency';
+
+/** 区间被关闭的原因，用于事后解释「这段时间为什么没计费」。 */
+export type UsageIntervalClosedReason =
+  | 'viewer_left'
+  | 'session_end'
+  | 'grace'
+  | 'tier_change'
+  | 'crash_recovery';
+
+/** 追加写的原始事件。**不参与计费计算**，仅用于审计与排查。 */
+export interface UsageEventRecord {
+  id: number;
+  sessionId: string;
+  providerId: string;
+  serverId: string;
+  role: UsageRole;
+  actorId: string;
+  eventType: string;
+  occurredAt: number;
+  tier: string | null;
+  width: number | null;
+  height: number | null;
+  frameRate: number | null;
+  bitrateMax: number | null;
+  lowLatency: number;
+  detail: string;
+}
+
+export interface UsageEventInput {
+  sessionId: string;
+  providerId?: string;
+  serverId?: string;
+  role: UsageRole;
+  actorId: string;
+  eventType: string;
+  occurredAt: number;
+  tier?: string | null;
+  width?: number | null;
+  height?: number | null;
+  frameRate?: number | null;
+  bitrateMax?: number | null;
+  lowLatency?: boolean;
+  detail?: string;
+}
+
+/**
+ * 结算区间：**计费事实来源**。
+ *
+ * `tier` / `billingModel` / `coefficient` 都是**结算时的快照**，
+ * 因此日后调整档位规则或折算系数不会改写历史账目。
+ */
+export interface UsageIntervalRecord {
+  id: number;
+  sessionId: string;
+  providerId: string;
+  serverId: string;
+  role: UsageRole;
+  actorId: string;
+  tier: string;
+  width: number | null;
+  height: number | null;
+  frameRate: number | null;
+  bitrateMax: number | null;
+  lowLatency: number;
+  billingModel: UsageBillingModel;
+  coefficient: number;
+  /** 归属的计费周期 `YYYY-MM`，开启区间时按配置时区算好并落库 */
+  periodKey: string;
+  startedAt: number;
+  /** null = 仍在进行（仅进程存活期间） */
+  endedAt: number | null;
+  durationMs: number | null;
+  /** durationMs × coefficient */
+  standardMs: number | null;
+  closedReason: UsageIntervalClosedReason | null;
+  createdAt: number;
+}
+
+export interface UsageIntervalOpenInput {
+  sessionId: string;
+  providerId: string;
+  serverId?: string;
+  role: UsageRole;
+  actorId: string;
+  tier: string;
+  billingModel: UsageBillingModel;
+  coefficient: number;
+  /** 计费周期 `YYYY-MM`。由调用方按配置时区计算（见 UsageLedgerService）。 */
+  periodKey: string;
+  startedAt: number;
+  width?: number | null;
+  height?: number | null;
+  frameRate?: number | null;
+  bitrateMax?: number | null;
+  lowLatency?: boolean;
+}
+
+export interface ProviderUsageMonthlyRecord {
+  providerId: string;
+  periodKey: string;
+  standardMinutes: number;
+  publisherMinutes: number;
+  viewerMinutes: number;
+  sessionCount: number;
+  updatedAt: number;
+}
+
 // ===== Service =====
 
 @Injectable()
@@ -897,6 +1010,317 @@ export class DatabaseService implements OnModuleDestroy {
       "DELETE FROM sessions WHERE id = ? AND status = 'pending' AND card_message_id IS NULL",
     ).run(id);
     return result.changes > 0;
+  }
+
+  // ===== Usage Ledger =====
+  //
+  // 这一层只做「行级存取」：列映射、插入、按条件更新。
+  // 计费语义（何时该开区间、系数怎么取、如何汇总）都在 UsageLedgerService 里，
+  // 与 AgoraProviderService 的分工一致。
+
+  private mapUsageEventRow(row: any): UsageEventRecord {
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      providerId: row.provider_id ?? '',
+      serverId: row.server_id ?? '',
+      role: row.role,
+      actorId: row.actor_id,
+      eventType: row.event_type,
+      occurredAt: row.occurred_at,
+      tier: row.tier ?? null,
+      width: row.width ?? null,
+      height: row.height ?? null,
+      frameRate: row.frame_rate ?? null,
+      bitrateMax: row.bitrate_max ?? null,
+      lowLatency: row.low_latency ?? 0,
+      detail: row.detail ?? '',
+    };
+  }
+
+  private mapUsageIntervalRow(row: any): UsageIntervalRecord {
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      providerId: row.provider_id,
+      serverId: row.server_id ?? '',
+      role: row.role,
+      actorId: row.actor_id,
+      tier: row.tier,
+      width: row.width ?? null,
+      height: row.height ?? null,
+      frameRate: row.frame_rate ?? null,
+      bitrateMax: row.bitrate_max ?? null,
+      lowLatency: row.low_latency ?? 0,
+      billingModel: row.billing_model,
+      coefficient: row.coefficient,
+      periodKey: row.period_key ?? '',
+      startedAt: row.started_at,
+      endedAt: row.ended_at ?? null,
+      durationMs: row.duration_ms ?? null,
+      standardMs: row.standard_ms ?? null,
+      closedReason: row.closed_reason ?? null,
+      createdAt: row.created_at,
+    };
+  }
+
+  private mapProviderUsageMonthlyRow(row: any): ProviderUsageMonthlyRecord {
+    return {
+      providerId: row.provider_id,
+      periodKey: row.period_key,
+      standardMinutes: row.standard_minutes ?? 0,
+      publisherMinutes: row.publisher_minutes ?? 0,
+      viewerMinutes: row.viewer_minutes ?? 0,
+      sessionCount: row.session_count ?? 0,
+      updatedAt: row.updated_at ?? 0,
+    };
+  }
+
+  // --- usage_events（审计用，不参与计费）---
+
+  insertUsageEvent(input: UsageEventInput): number {
+    return this.db.prepare(`
+      INSERT INTO usage_events (
+        session_id, provider_id, server_id, role, actor_id, event_type, occurred_at,
+        tier, width, height, frame_rate, bitrate_max, low_latency, detail
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.sessionId,
+      input.providerId ?? '',
+      input.serverId ?? '',
+      input.role,
+      input.actorId,
+      input.eventType,
+      input.occurredAt,
+      input.tier ?? null,
+      input.width ?? null,
+      input.height ?? null,
+      input.frameRate ?? null,
+      input.bitrateMax ?? null,
+      input.lowLatency ? 1 : 0,
+      input.detail ?? '',
+    ).lastInsertRowid as number;
+  }
+
+  listUsageEventsBySession(sessionId: string): UsageEventRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM usage_events WHERE session_id = ? ORDER BY occurred_at ASC, id ASC')
+      .all(sessionId) as any[];
+    return rows.map((row) => this.mapUsageEventRow(row));
+  }
+
+  // --- usage_intervals（计费事实来源）---
+
+  /** 开启一个计费区间。调用方负责判断「此刻是否应该计费」并算好周期键。 */
+  openUsageInterval(input: UsageIntervalOpenInput): number {
+    return this.db.prepare(`
+      INSERT INTO usage_intervals (
+        session_id, provider_id, server_id, role, actor_id, tier,
+        width, height, frame_rate, bitrate_max, low_latency,
+        billing_model, coefficient, period_key, started_at,
+        ended_at, duration_ms, standard_ms, closed_reason, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?)
+    `).run(
+      input.sessionId,
+      input.providerId,
+      input.serverId ?? '',
+      input.role,
+      input.actorId,
+      input.tier,
+      input.width ?? null,
+      input.height ?? null,
+      input.frameRate ?? null,
+      input.bitrateMax ?? null,
+      input.lowLatency ? 1 : 0,
+      input.billingModel,
+      input.coefficient,
+      input.periodKey,
+      input.startedAt,
+      Date.now(),
+    ).lastInsertRowid as number;
+  }
+
+  /**
+   * 关闭区间并结算。
+   *
+   * 时长与标准时长直接在 SQL 里算，避免「先读再写」的竞态；
+   * `WHERE ended_at IS NULL` 让重复关闭变成无害的 no-op。
+   */
+  closeUsageInterval(id: number, endedAt: number, reason: UsageIntervalClosedReason): void {
+    this.db.prepare(`
+      UPDATE usage_intervals
+      SET ended_at = ?,
+          duration_ms = MAX(0, ? - started_at),
+          standard_ms = MAX(0, ? - started_at) * coefficient,
+          closed_reason = ?
+      WHERE id = ? AND ended_at IS NULL
+    `).run(endedAt, endedAt, endedAt, reason, id);
+  }
+
+  /** 关闭某会话下某个参与者仍在进行的区间。返回关闭数量。 */
+  closeOpenUsageIntervalsForActor(
+    sessionId: string,
+    role: UsageRole,
+    actorId: string,
+    endedAt: number,
+    reason: UsageIntervalClosedReason,
+  ): number {
+    const open = this.db
+      .prepare(
+        `SELECT id FROM usage_intervals
+         WHERE session_id = ? AND role = ? AND actor_id = ? AND ended_at IS NULL`,
+      )
+      .all(sessionId, role, actorId) as any[];
+    const close = this.db.transaction(() => {
+      for (const row of open) this.closeUsageInterval(row.id, endedAt, reason);
+    });
+    close();
+    return open.length;
+  }
+
+  /** 关闭某会话下全部未关闭区间（会话结束时调用）。返回关闭数量。 */
+  closeOpenUsageIntervalsForSession(
+    sessionId: string,
+    endedAt: number,
+    reason: UsageIntervalClosedReason,
+  ): number {
+    const open = this.db
+      .prepare('SELECT id FROM usage_intervals WHERE session_id = ? AND ended_at IS NULL')
+      .all(sessionId) as any[];
+    const close = this.db.transaction(() => {
+      for (const row of open) this.closeUsageInterval(row.id, endedAt, reason);
+    });
+    close();
+    return open.length;
+  }
+
+  getOpenUsageInterval(
+    sessionId: string,
+    role: UsageRole,
+    actorId: string,
+  ): UsageIntervalRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM usage_intervals
+         WHERE session_id = ? AND role = ? AND actor_id = ? AND ended_at IS NULL
+         ORDER BY started_at DESC LIMIT 1`,
+      )
+      .get(sessionId, role, actorId) as any;
+    return row ? this.mapUsageIntervalRow(row) : undefined;
+  }
+
+  /** 全部未关闭区间。启动时用于崩溃恢复。 */
+  listOpenUsageIntervals(): UsageIntervalRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM usage_intervals WHERE ended_at IS NULL ORDER BY started_at ASC')
+      .all() as any[];
+    return rows.map((row) => this.mapUsageIntervalRow(row));
+  }
+
+  /** 某会话下仍未关闭的区间（用于把「进行中」的实时时长补进合计）。 */
+  listOpenUsageIntervalsBySession(sessionId: string): UsageIntervalRecord[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM usage_intervals WHERE session_id = ? AND ended_at IS NULL ORDER BY started_at ASC',
+      )
+      .all(sessionId) as any[];
+    return rows.map((row) => this.mapUsageIntervalRow(row));
+  }
+
+  listUsageIntervalsBySession(sessionId: string): UsageIntervalRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM usage_intervals WHERE session_id = ? ORDER BY started_at ASC, id ASC')
+      .all(sessionId) as any[];
+    return rows.map((row) => this.mapUsageIntervalRow(row));
+  }
+
+  /**
+   * **已关闭**区间的时长合计。
+   *
+   * 未关闭区间不在这里补齐 —— 那需要「现在几点」，会让查询带上时间依赖。
+   * 调用方用 `listOpenUsageIntervals` 自行加上「now - started_at」。
+   */
+  sumClosedUsageDurationMs(sessionId: string, role: UsageRole): number {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(duration_ms), 0) AS total
+         FROM usage_intervals WHERE session_id = ? AND role = ? AND ended_at IS NOT NULL`,
+      )
+      .get(sessionId, role) as any;
+    return Number(row?.total ?? 0);
+  }
+
+  // --- provider_usage_monthly（配额判断用的汇总缓存）---
+
+  upsertProviderUsageMonthly(record: Omit<ProviderUsageMonthlyRecord, 'updatedAt'>): void {
+    this.db.prepare(`
+      INSERT INTO provider_usage_monthly (
+        provider_id, period_key, standard_minutes, publisher_minutes,
+        viewer_minutes, session_count, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(provider_id, period_key) DO UPDATE SET
+        standard_minutes  = excluded.standard_minutes,
+        publisher_minutes = excluded.publisher_minutes,
+        viewer_minutes    = excluded.viewer_minutes,
+        session_count     = excluded.session_count,
+        updated_at        = excluded.updated_at
+    `).run(
+      record.providerId,
+      record.periodKey,
+      record.standardMinutes,
+      record.publisherMinutes,
+      record.viewerMinutes,
+      record.sessionCount,
+      Date.now(),
+    );
+  }
+
+  getProviderUsageMonthly(
+    providerId: string,
+    periodKey: string,
+  ): ProviderUsageMonthlyRecord | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM provider_usage_monthly WHERE provider_id = ? AND period_key = ?')
+      .get(providerId, periodKey) as any;
+    return row ? this.mapProviderUsageMonthlyRow(row) : undefined;
+  }
+
+  listProviderUsageMonthly(periodKey: string): ProviderUsageMonthlyRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM provider_usage_monthly WHERE period_key = ? ORDER BY provider_id ASC')
+      .all(periodKey) as any[];
+    return rows.map((row) => this.mapProviderUsageMonthlyRow(row));
+  }
+
+  /**
+   * 按 Provider + 角色聚合某计费周期内**已关闭**的区间。
+   *
+   * 直接用落库的 `period_key` 过滤，不做时区区间换算 ——
+   * 周期归属在开启区间时就已按配置时区确定，跨月区间整体计入起始月。
+   */
+  aggregateUsageByProvider(
+    periodKey: string,
+  ): { providerId: string; role: UsageRole; standardMs: number; durationMs: number; sessionCount: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT
+           provider_id,
+           role,
+           COALESCE(SUM(standard_ms), 0) AS standard_ms,
+           COALESCE(SUM(duration_ms), 0)  AS duration_ms,
+           COUNT(DISTINCT session_id)     AS sessions
+         FROM usage_intervals
+         WHERE ended_at IS NOT NULL AND period_key = ?
+         GROUP BY provider_id, role`,
+      )
+      .all(periodKey) as any[];
+    return rows.map((row) => ({
+      providerId: row.provider_id,
+      role: row.role,
+      standardMs: Number(row.standard_ms),
+      durationMs: Number(row.duration_ms),
+      sessionCount: Number(row.sessions),
+    }));
   }
 
   // ===== KOOK Webhook Inbox =====

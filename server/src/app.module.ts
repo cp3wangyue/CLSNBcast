@@ -3,6 +3,7 @@ import { EventsModule } from './modules/events/events.module';
 import { DatabaseModule } from './modules/database/database.module';
 import { CryptoModule } from './modules/crypto/crypto.module';
 import { AgoraModule } from './modules/agora/agora.module';
+import { UsageModule } from './modules/usage/usage.module';
 import { SessionModule } from './modules/session/session.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { KookModule } from './modules/kook/kook.module';
@@ -17,6 +18,7 @@ import { NoticesModule } from './modules/notices/notices.module';
     DatabaseModule,
     CryptoModule,
     AgoraModule,
+    UsageModule,
     SessionModule,
     AuthModule,
     KookModule,
