@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
+import { RtcRole, RtcTokenBuilder } from 'agora-token';
 import { randomUUID } from 'crypto';
 import {
   AgoraProviderHealthStatus,
@@ -135,6 +137,13 @@ type UsabilityCheck =
   | { status: 'ok' }
   | { status: 'failed'; code: ProviderResolutionFailureCode; message: string };
 
+/** 一次健康检查的结果。 */
+export interface ProviderHealthOutcome {
+  providerId: string;
+  status: AgoraProviderHealthStatus;
+  message: string;
+}
+
 const OWNER_TYPES: AgoraProviderOwnerType[] = ['platform', 'space', 'user'];
 const MIN_TOKEN_EXPIRE_SEC = 60;
 const MAX_TOKEN_EXPIRE_SEC = 24 * 3600;
@@ -162,6 +171,93 @@ export class AgoraProviderService implements OnModuleInit {
     // 否则应用会带着「读不出凭证」的状态继续运行，问题被推迟到用户开始共享时才暴露。
     this.crypto.assertUsableForExistingSecrets(this.db.listProviderCiphertexts());
     this.adoptLegacyServerCredentials();
+    // 启动时先探一次，让管理面板立刻有健康状态可看。
+    // 离线检查是纯本地 HMAC 计算，不产生任何声网调用或计费。
+    this.checkAllHealth();
+  }
+
+  // ===== 健康检查 =====
+
+  /**
+   * 单个 Provider 的**离线**健康检查。
+   *
+   * 判定逻辑：能解密证书 + 能用它签出一个 Token ⇒ healthy。
+   * 两者都是本地计算（AES-GCM 解密 + HMAC 签名），**不产生任何声网侧调用与计费**。
+   *
+   * 声网没有「免费验证 App ID 是否可用」的接口，所以：
+   * - 这里能覆盖「证书配错了 / 主密钥不匹配 / 字段为空」这类最常见的问题；
+   * - 覆盖不到「账号欠费 / 项目被停用」——那需要调用官方 RESTful API（需 Customer ID/Secret），
+   *   留待后续按需接入；真实 RTC join 探针会产生真实计费，只应手动触发。
+   *
+   * 已停用的 Provider 跳过检查，避免给面板制造无意义告警。
+   */
+  checkHealth(providerId: string): ProviderHealthOutcome {
+    const provider = this.db.getProvider(providerId);
+    if (!provider) {
+      return { providerId, status: 'unknown', message: 'Provider 不存在' };
+    }
+    if (!provider.enabled) {
+      return { providerId, status: provider.healthStatus, message: provider.healthMessage };
+    }
+
+    let status: AgoraProviderHealthStatus;
+    let message: string;
+
+    if (!provider.appCertificateEnc) {
+      status = 'unhealthy';
+      message = '未配置 App Certificate';
+    } else {
+      try {
+        const withSecrets = this.getWithSecrets(providerId)!;
+        const now = Math.floor(Date.now() / 1000);
+        const probe = RtcTokenBuilder.buildTokenWithUid(
+          provider.appId,
+          withSecrets.appCertificate,
+          'cb_healthcheck',
+          1,
+          RtcRole.PUBLISHER,
+          now + 60,
+          now + 60,
+        );
+        if (!probe) {
+          // ⚠️ agora-token 在 App Certificate 长度不合法（声网要求 32 字符）时
+          // **不抛错，而是返回空串**。只靠 try/catch 会把这种情况误判为健康。
+          status = 'unhealthy';
+          message = 'App Certificate 长度不合法（声网要求 32 字符），无法签发 Token';
+        } else {
+          status = 'healthy';
+          message = '';
+        }
+      } catch {
+        // 不回显底层错误：它的信息可能含密文片段。只给出可操作的原因。
+        status = 'unhealthy';
+        message = 'App ID 或 App Certificate 不可用（无法签发 Token）';
+      }
+    }
+
+    this.db.updateProvider(providerId, {
+      healthStatus: status,
+      healthCheckedAt: Date.now(),
+      healthMessage: message,
+    });
+    return { providerId, status, message };
+  }
+
+  checkAllHealth(): ProviderHealthOutcome[] {
+    return this.db.listProviders().map((provider) => this.checkHealth(provider.id));
+  }
+
+  /** 定时离线健康检查。30 分钟一次，全程免费。 */
+  @Interval(30 * 60 * 1000)
+  scheduledHealthCheck(): void {
+    const results = this.checkAllHealth();
+    const unhealthy = results.filter((outcome) => outcome.status === 'unhealthy');
+    if (unhealthy.length > 0) {
+      this.logger.warn(
+        `Health check: ${unhealthy.length}/${results.length} provider(s) unhealthy: ` +
+          unhealthy.map((o) => `${o.providerId}(${o.message})`).join(', '),
+      );
+    }
   }
 
   /**

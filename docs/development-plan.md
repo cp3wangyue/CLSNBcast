@@ -163,10 +163,17 @@ npm run verify        # = typecheck + build + test
         IDOR 被阻断、删除被会话引用的 Provider 被拒绝
   - [ ] 前端 UI：超管 Provider 管理页；服务器管理页的 Agora 配置改为「选 Provider / 新建 BYOK」
   - [ ] 前端：超管 Provider 管理页；服务器管理页的 Agora 配置改为选 Provider 或新建 BYOK
-- [ ] **1-6 健康检查与用量汇总**
-  - [ ] 健康检查任务：离线校验（可解密 + 可试签 token）永远执行；有 Customer 凭证时叠加官方 API
-  - [ ] `provider_usage_monthly` 汇总任务（Phase 2 完成后接管数据源；此时可先留空表）
-  - [ ] 健康状态写入 `health_status` / `health_checked_at` / `health_message`
+- [x] **1-6 健康检查**（用量汇总属 Phase 2，需要账本表）
+  - [x] **离线检查**（免费）：能解密证书 + 能签出 Token ⇒ `healthy`；
+        否则 `unhealthy` 并写入可操作的原因。启动时跑一次，之后每 30 分钟一次
+  - [x] 🔎 关键细节：`RtcTokenBuilder` 在 App Certificate 长度不合法（声网要求 32 字符）时
+        **不抛错而是返回空串**，所以必须显式检查 token 非空，只靠 try/catch 会把坏证书误判为健康
+  - [x] 已停用的 Provider 跳过检查，不给面板制造无意义告警
+  - [x] `health_message` 与日志都不回显底层错误（可能含密文片段）
+  - [x] 检查结果与解析联动：被判不健康的 Provider 不再被分配新会话（故障容灾生效）
+  - [x] 单测 11 个
+  - [ ] 官方 RESTful API 用量/健康核对（需 Customer ID/Secret）—— 随 Phase 2 的对账一起做
+  - [ ] 真实 RTC join 探针：会产生真实计费，仅管理员手动触发（**不实现自动探针**）
 
 ### 验收
 

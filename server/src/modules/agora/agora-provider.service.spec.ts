@@ -10,7 +10,8 @@ import { currentPeriodKey } from './provider-quota';
 
 const HEX_KEY = 'a'.repeat(64);
 const APP_ID = '0123456789abcdef0123456789abcdef';
-const CERT = 'plain-certificate-value-should-never-be-stored';
+// 声网 App Certificate 固定 32 字符；长度不对时 RtcTokenBuilder 会返回空串而不是抛错
+const CERT = 'fedcba9876543210fedcba9876543210';
 const CUSTOMER_SECRET = 'plain-customer-secret';
 
 function baseCreate(overrides: Record<string, unknown> = {}) {
@@ -779,6 +780,119 @@ describe('AgoraProviderService', () => {
         const result = resolve({ requestedProviderId: p.id, allowExplicitSelection: true });
         expect(result.status).toBe('failed');
       });
+    });
+  });
+
+  // ===== 健康检查 =====
+
+  describe('健康检查（离线）', () => {
+    it('证书合法时标记为 healthy 并记录检查时间', () => {
+      const { id } = service.create(baseCreate());
+
+      const outcome = service.checkHealth(id);
+
+      expect(outcome.status).toBe('healthy');
+      expect(outcome.message).toBe('');
+
+      const view = service.getForAdmin(id)!;
+      expect(view.healthStatus).toBe('healthy');
+      expect(view.healthCheckedAt).toBeGreaterThan(0);
+      expect(view.healthMessage).toBe('');
+    });
+
+    it('没有证书时标记为 unhealthy', () => {
+      const { id } = service.create(baseCreate());
+      db.updateProvider(id, { appCertificateEnc: '' });
+
+      const outcome = service.checkHealth(id);
+
+      expect(outcome.status).toBe('unhealthy');
+      expect(outcome.message).toContain('未配置 App Certificate');
+    });
+
+    it('🔎 证书长度不合法时也标记为 unhealthy（此时 SDK 返回空串而不是抛错）', () => {
+      // 声网 App Certificate 固定 32 字符。长度不对时 buildTokenWithUid 不抛错，
+      // 而是返回空串 —— 只靠 try/catch 会把它误判为健康。
+      const { id } = service.create(baseCreate({ appCertificate: 'too-short' }));
+
+      const outcome = service.checkHealth(id);
+
+      expect(outcome.status).toBe('unhealthy');
+      expect(outcome.message).toContain('32 字符');
+    });
+
+    it('主密钥不匹配（解密失败）时标记为 unhealthy', () => {
+      const { id } = service.create(baseCreate());
+      process.env.SECRET_ENCRYPTION_KEY = 'b'.repeat(64);
+      const other = new AgoraProviderService(db, new SecretCryptoService());
+
+      expect(other.checkHealth(id).status).toBe('unhealthy');
+    });
+
+    it('已停用的 Provider 跳过检查，状态保持不变', () => {
+      const { id } = service.create(baseCreate());
+      service.checkHealth(id); // 先变成 healthy
+      service.update(id, { enabled: false });
+
+      const outcome = service.checkHealth(id);
+
+      expect(outcome.status).toBe('healthy');
+      expect(service.getForAdmin(id)!.healthStatus).toBe('healthy');
+    });
+
+    it('不存在的 Provider 返回 unknown', () => {
+      expect(service.checkHealth('nope').status).toBe('unknown');
+    });
+
+    it('checkAllHealth 覆盖全部 Provider', () => {
+      const healthy = service.create(baseCreate({ name: 'a' })).id;
+      const broken = service.create(baseCreate({ name: 'b', appCertificate: 'short' })).id;
+
+      const results = service.checkAllHealth();
+
+      expect(results).toHaveLength(2);
+      expect(results.find((r) => r.providerId === healthy)!.status).toBe('healthy');
+      expect(results.find((r) => r.providerId === broken)!.status).toBe('unhealthy');
+    });
+
+    it('检查结果与解析联动：被判不健康的 Provider 不再被分配新会话', () => {
+      const broken = service.create(
+        baseCreate({ ownerType: 'space', ownerId: 'g1', appCertificate: 'short' }),
+      ).id;
+      expect(service.resolveForSession({ serverId: 'g1', sharerUserId: 'u' }).status).toBe('ok');
+
+      service.checkHealth(broken);
+
+      expect(service.resolveForSession({ serverId: 'g1', sharerUserId: 'u' }).status).toBe('failed');
+    });
+
+    it('health_message 与日志都不含证书', () => {
+      const { id } = service.create(baseCreate({ appCertificate: 'short' }));
+      const spies = [
+        vi.spyOn(Logger.prototype, 'log'),
+        vi.spyOn(Logger.prototype, 'warn'),
+        vi.spyOn(Logger.prototype, 'error'),
+      ];
+
+      const outcome = service.checkHealth(id);
+
+      expect(outcome.message).not.toContain(CERT);
+      for (const spy of spies) {
+        for (const call of spy.mock.calls) {
+          expect(call.map(String).join(' ')).not.toContain(CERT);
+        }
+      }
+      expect(service.getForAdmin(id)!.healthMessage).not.toContain(CERT);
+    });
+
+    it('onModuleInit 会先做一次检查，让面板启动就有状态', () => {
+      const { id } = service.create(baseCreate());
+      expect(service.getForAdmin(id)!.healthCheckedAt).toBeNull();
+
+      service.onModuleInit();
+
+      expect(service.getForAdmin(id)!.healthStatus).toBe('healthy');
+      expect(service.getForAdmin(id)!.healthCheckedAt).toBeGreaterThan(0);
     });
   });
 });

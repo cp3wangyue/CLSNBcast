@@ -10,7 +10,7 @@ import { SuperAdminController } from '../super-admin/super-admin.controller';
 import { ServerAdminController } from '../server-admin/server-admin.controller';
 
 const HEX_KEY = 'a'.repeat(64);
-const CERT = 'plain-cert-must-never-be-returned';
+const CERT = 'fedcba9876543210fedcba9876543210';
 const APP_ID = '0123456789abcdef0123456789abcdef';
 
 const SPACE_A = 'guild-a';
