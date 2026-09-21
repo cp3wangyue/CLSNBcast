@@ -1,6 +1,8 @@
 import type {
   SessionInfo,
   AgoraTokenResponse,
+  AgoraProvider,
+  AgoraProviderFormInput,
 } from '../types';
 
 const SUPER_TOKEN_KEY = 'clsnbcast_super_token';
@@ -396,5 +398,69 @@ export const api = {
   },
   getSpaceSessions(platform: Platform, externalId: string): Promise<any[]> {
     return spaceRequest(platform, externalId, spaceApiBase(platform, externalId) + '/sessions');
+  },
+
+  // ===== Agora Provider（超管）=====
+  getSuperProviders(): Promise<AgoraProvider[]> {
+    return superRequest('/api/super/providers');
+  },
+  createSuperProvider(input: AgoraProviderFormInput): Promise<{ ok: boolean; provider: AgoraProvider }> {
+    return superRequest('/api/super/providers', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  updateSuperProvider(
+    id: string,
+    input: Partial<AgoraProviderFormInput>,
+  ): Promise<{ ok: boolean; provider?: AgoraProvider; message?: string }> {
+    return superRequest('/api/super/providers/' + encodeURIComponent(id), {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+  deleteSuperProvider(id: string): Promise<{ ok: boolean; message?: string }> {
+    return superRequest('/api/super/providers/' + encodeURIComponent(id), { method: 'DELETE' });
+  },
+
+  // ===== Agora Provider（频道主 BYOK）=====
+  // 归属由服务端强制绑定到该服务器，前端不传也传不了 ownerType / ownerId
+  getSpaceProviders(platform: Platform, externalId: string): Promise<AgoraProvider[]> {
+    return spaceRequest(platform, externalId, spaceApiBase(platform, externalId) + '/providers');
+  },
+  createSpaceProvider(
+    platform: Platform,
+    externalId: string,
+    input: AgoraProviderFormInput,
+  ): Promise<{ ok: boolean; provider?: AgoraProvider; message?: string }> {
+    return spaceRequest(platform, externalId, spaceApiBase(platform, externalId) + '/providers', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  updateSpaceProvider(
+    platform: Platform,
+    externalId: string,
+    id: string,
+    input: Partial<AgoraProviderFormInput>,
+  ): Promise<{ ok: boolean; provider?: AgoraProvider; message?: string }> {
+    return spaceRequest(
+      platform,
+      externalId,
+      spaceApiBase(platform, externalId) + '/providers/' + encodeURIComponent(id),
+      { method: 'PUT', body: JSON.stringify(input) },
+    );
+  },
+  deleteSpaceProvider(
+    platform: Platform,
+    externalId: string,
+    id: string,
+  ): Promise<{ ok: boolean; message?: string }> {
+    return spaceRequest(
+      platform,
+      externalId,
+      spaceApiBase(platform, externalId) + '/providers/' + encodeURIComponent(id),
+      { method: 'DELETE' },
+    );
   },
 };

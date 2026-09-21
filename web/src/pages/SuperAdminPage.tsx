@@ -5,6 +5,7 @@ import {
   ChevronUp,
   Edit3,
   ExternalLink,
+  KeyRound,
   LogOut,
   Plus,
   RefreshCw,
@@ -16,12 +17,15 @@ import {
 } from 'lucide-react';
 import { api, getSuperAdminToken, clearSuperAdminToken } from '../lib/api';
 import { cn } from '../lib/utils';
+import { ProviderManager } from '../components/providers/ProviderManager';
+import type { AgoraProvider } from '../types';
 
-type Tab = 'config' | 'kook' | 'notices';
+type Tab = 'config' | 'providers' | 'kook' | 'notices';
 type ServerDetailTab = 'events' | 'sessions';
 
 const TABS: { id: Tab; label: string; icon: typeof Settings }[] = [
   { id: 'config', label: '全局配置', icon: Settings },
+  { id: 'providers', label: 'Agora 凭证池', icon: KeyRound },
   { id: 'kook', label: 'KOOK 服务器', icon: Server },
   { id: 'notices', label: '通知管理', icon: Bell },
 ];
@@ -124,6 +128,7 @@ export default function SuperAdminPage() {
         </div>
 
         {tab === 'config' && <GlobalConfigPanel />}
+        {tab === 'providers' && <ProvidersPanel />}
         {tab === 'kook' && !selectedServerId && (
           <ServerListPanel onSelectServer={handleServerSelect} />
         )}
@@ -132,6 +137,58 @@ export default function SuperAdminPage() {
         )}
         {tab === 'notices' && <NoticeManagementPanel />}
       </main>
+    </div>
+  );
+}
+
+// ===== Agora Providers Panel =====
+
+function ProvidersPanel() {
+  const [providers, setProviders] = useState<AgoraProvider[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const reload = async () => {
+    try {
+      setProviders(await api.getSuperProviders());
+      setError('');
+    } catch (e: any) {
+      setError(e?.message || '加载失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    reload();
+  }, []);
+
+  if (loading) return <div className="text-muted text-sm">加载中...</div>;
+
+  return (
+    <div className="max-w-4xl space-y-4">
+      {error && (
+        <div className="glass rounded-xl px-4 py-3 border border-red-400/30 text-sm text-red-300">
+          {error}
+        </div>
+      )}
+      <div className="glass rounded-2xl p-5">
+        <h3 className="font-semibold text-white">Agora 凭证池</h3>
+        <p className="text-xs text-muted mt-0.5 mb-4">
+          新会话按「服务器自带 → 用户自带 → 平台池（按优先级升序）」自动选一个 Provider 并固定绑定。
+          不可用的 Provider（已停用 / 健康检查未通过 / 已达配额）会被跳过。
+        </p>
+        <ProviderManager
+          providers={providers}
+          showOwner
+          allowOwnerSelection
+          advanced
+          onCreate={api.createSuperProvider}
+          onUpdate={api.updateSuperProvider}
+          onDelete={api.deleteSuperProvider}
+          onReload={reload}
+        />
+      </div>
     </div>
   );
 }

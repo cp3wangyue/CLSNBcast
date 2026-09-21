@@ -44,3 +44,58 @@ export interface AgoraTokenResponse {
   appId: string;
   expireSec: number;
 }
+
+// ===== Agora Provider =====
+
+export type AgoraProviderOwnerType = 'platform' | 'space' | 'user';
+export type AgoraProviderHealthStatus = 'unknown' | 'healthy' | 'degraded' | 'unhealthy';
+
+/**
+ * 管理端可见的 Provider 视图。
+ *
+ * ⚠️ 后端**只**返回 `hasAppCertificate` / `hasCustomerSecret` 布尔值，
+ * 明文证书与 Customer Secret 没有任何读回接口。表单里留空即表示「保持不变」。
+ */
+export interface AgoraProvider {
+  id: string;
+  ownerType: AgoraProviderOwnerType;
+  ownerId: string;
+  name: string;
+  appId: string;
+  hasAppCertificate: boolean;
+  customerId: string | null;
+  hasCustomerSecret: boolean;
+  enabled: boolean;
+  priority: number;
+  tokenExpireSec: number;
+  healthStatus: AgoraProviderHealthStatus;
+  healthCheckedAt: number | null;
+  healthMessage: string;
+  /** null = 不限量 */
+  monthlyQuotaStandardMinutes: number | null;
+  quotaEnforced: boolean;
+  estimatedUsageStandardMinutes: number;
+  usagePeriodKey: string;
+  lastUsedAt: number | null;
+  allowedPresetIds: string[] | null;
+  note: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 新建 / 更新 Provider 的表单载荷。秘密字段留空表示不修改。 */
+export interface AgoraProviderFormInput {
+  ownerType?: AgoraProviderOwnerType;
+  ownerId?: string;
+  name: string;
+  appId: string;
+  appCertificate?: string;
+  customerId?: string | null;
+  customerSecret?: string;
+  enabled?: boolean;
+  priority?: number;
+  tokenExpireSec?: number;
+  monthlyQuotaStandardMinutes?: number | null;
+  quotaEnforced?: boolean;
+  note?: string;
+}

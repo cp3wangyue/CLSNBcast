@@ -161,7 +161,23 @@ npm run verify        # = typecheck + build + test
   - [x] 单测 21 个 + **真实 HTTP 验证 20 项**：三组新路由均受鉴权保护（无 token 401）、
         超管 CRUD 正常且响应无明文、频道主伪造 ownerType 被强制改写、跨角色访问 403、
         IDOR 被阻断、删除被会话引用的 Provider 被拒绝
-  - [ ] 前端 UI：超管 Provider 管理页；服务器管理页的 Agora 配置改为「选 Provider / 新建 BYOK」
+  - [x] 前端 UI：超管新增「Agora 凭证池」标签页（全量 CRUD、归属三态、优先级、配额、
+        Customer 凭证、备注）；服务器管理页的 Agora 配置改为「Provider 列表 + 新建 BYOK」，
+        删掉了原来的 App ID / Certificate / Token 有效期输入框
+  - [x] 共用组件 `web/src/components/providers/ProviderManager.tsx`，差异由 props 控制
+        （`showOwner` / `allowOwnerSelection` / `advanced`）
+  - [x] 编辑时证书与 Customer Secret **永远显示为空**，留空即「保持不变」——
+        不存在把掩码写回去覆盖真值的风险；归属选择框在编辑态禁用
+  - [x] 保存配置时前端不再提交 `agoraAppId` / `agoraAppCertificate` / `agoraTokenExpireSec`
+        （凭证已归 Provider 管理，避免把面板空值写回库）
+  - [x] 顺手修一处 a11y 问题：提示文案原先写在 `<label>` 内，会被并入输入框的无障碍名称
+        （自动化与读屏软件都会读到一整段提示），已移到 label 之外
+  - [x] **浏览器实测**（真实 HTTP + 真实 SQLite）：超管标签页渲染、空状态、新建表单全字段、
+        通过 UI 创建 Provider 成功、编辑表单证书字段为空且归属锁定、频道主页面渲染、
+        频道主表单无归属选择器、通过 UI 创建 BYOK 成功；数据库确认两个 Provider 分别是
+        `platform:-` 与 `space:guild-ui`（**归属由服务端强制写入**），证书均为 `v1:` 密文信封、
+        无明文；同时验证改名后的 localStorage key（`clsnbcast_super_token` /
+        `clsnbcast_space_kook_*`）端到端可用
   - [ ] 前端：超管 Provider 管理页；服务器管理页的 Agora 配置改为选 Provider 或新建 BYOK
 - [x] **1-6 健康检查**（用量汇总属 Phase 2，需要账本表）
   - [x] **离线检查**（免费）：能解密证书 + 能签出 Token ⇒ `healthy`；

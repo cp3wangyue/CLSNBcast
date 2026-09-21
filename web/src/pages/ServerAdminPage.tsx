@@ -9,6 +9,8 @@ import {
 } from '../lib/api';
 import { cn } from '../lib/utils';
 import { QUALITY_OPTIONS } from '../hooks/useScreenShare';
+import { ProviderManager } from '../components/providers/ProviderManager';
+import type { AgoraProvider } from '../types';
 import { NoticeBanners, NoticeProvider } from '../components/notices/NoticeCenter';
 
 const PLATFORM = 'kook' as const;
@@ -351,7 +353,10 @@ function ServerConfigPanel({ serverId }: { serverId: string }) {
     setSaving(true);
     setError('');
     try {
-      await api.updateSpaceConfig(PLATFORM, serverId, config);
+      // Agora 凭证已改由 Provider 管理，这三个字段不再由本页提交，
+      // 避免把面板里的空值/掩码写回数据库。
+      const { agoraAppId, agoraAppCertificate, agoraTokenExpireSec, ...payload } = config;
+      await api.updateSpaceConfig(PLATFORM, serverId, payload);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e: any) {
@@ -365,26 +370,9 @@ function ServerConfigPanel({ serverId }: { serverId: string }) {
 
   return (
     <div className="space-y-6">
-      <ConfigSection title="声网 Agora" desc="配置本服务器的声网凭证">
-        <Field
-          label="App ID"
-          value={config.agoraAppId}
-          onChange={(v) => update(['agoraAppId'], v)}
-          placeholder="如 8a3c..."
-        />
-        <Field
-          label="App Certificate"
-          value={config.agoraAppCertificate}
-          onChange={(v) => update(['agoraAppCertificate'], v)}
-          placeholder="已配置则显示 ******"
-        />
-        <Field
-          label="Token 有效期（秒）"
-          type="number"
-          value={String(config.agoraTokenExpireSec)}
-          onChange={(v) => update(['agoraTokenExpireSec'], Number(v))}
-        />
-        <div>
+      <ConfigSection title="声网 Agora" desc="配置本服务器自己的声网凭证（BYOK）">
+        <SpaceProviderSection serverId={serverId} />
+        <div className="pt-2 border-t border-white/5">
           <label className="text-xs text-muted mb-2 block">允许的画质</label>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             {QUALITY_OPTIONS.map((q: any) => {
@@ -508,6 +496,48 @@ function ServerConfigPanel({ serverId }: { serverId: string }) {
       >
         {saving ? '保存中...' : saved ? '已保存' : '保存配置'}
       </button>
+    </div>
+  );
+}
+
+// ===== Agora Provider（本服务器 BYOK）=====
+
+/**
+ * 频道主只能管理自己服务器的 Provider。归属由服务端强制绑定，
+ * 前端不传也传不了 ownerType / ownerId。
+ */
+function SpaceProviderSection({ serverId }: { serverId: string }) {
+  const [providers, setProviders] = useState<AgoraProvider[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const reload = async () => {
+    try {
+      setProviders(await api.getSpaceProviders(PLATFORM, serverId));
+      setError('');
+    } catch (e: any) {
+      setError(e?.message || '加载失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    reload();
+  }, [serverId]);
+
+  if (loading) return <div className="text-xs text-muted">加载中...</div>;
+
+  return (
+    <div className="space-y-3">
+      {error && <p className="text-xs text-red-300">{error}</p>}
+      <ProviderManager
+        providers={providers}
+        onCreate={(input) => api.createSpaceProvider(PLATFORM, serverId, input)}
+        onUpdate={(id, input) => api.updateSpaceProvider(PLATFORM, serverId, id, input)}
+        onDelete={(id) => api.deleteSpaceProvider(PLATFORM, serverId, id)}
+        onReload={reload}
+      />
     </div>
   );
 }
