@@ -178,6 +178,8 @@ STANDARD_MINUTE_PRICE = 0.007    // 元 / 标准分钟
 
 费用在 `SessionService.toInfo()` 里算（`session.service.ts:538-634`）：档位由 `getQualityInfo(session.quality).tier` 反查 → 取系数 → 主播按音频系数、观众按视频系数 → 求和向上取整 → × 0.007。
 
+> ⚠️ 上表 `ULTRA_LOW_LATENCY_COEFFICIENTS` 的 **Full HD 值 `4.57` 与官方文档不符（应为 `4.5`）**，且极速直播是默认模式，属系统性高估。核对过程与校准方案见 [open-questions.md](./open-questions.md) 第 4 节。
+
 **缺口清单**：
 
 - 没有 per-viewer 记录（加入时间、离开时间、单次时长）——只有总和。

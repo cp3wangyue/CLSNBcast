@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS quality_config (
 [
   { "tier": "SD 标清",        "maxPixels": 307200,  "interactive": 4,    "ultraLowLatency": 2    },
   { "tier": "HD 高清",        "maxPixels": 921600,  "interactive": 4,    "ultraLowLatency": 2    },
-  { "tier": "Full HD 全高清",  "maxPixels": 2073600, "interactive": 9,    "ultraLowLatency": 4.57 },
+  { "tier": "Full HD 全高清",  "maxPixels": 2073600, "interactive": 9,    "ultraLowLatency": 4.5  },
   { "tier": "2K",            "maxPixels": 3686400, "interactive": 16,   "ultraLowLatency": 8    },
   { "tier": "2K+ 超高清",      "maxPixels": null,    "interactive": 36,   "ultraLowLatency": 18   }
 ]
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS quality_config (
 
 > ⚠️ 官方计费表里**没有「SD 标清」档**（SD 分辨率被归入 HD 档），所以 SD 与 HD 的系数相同。上游代码的注释也承认了这一点（`session.types.ts:51`：`'SD 标清': 4, // SD 分辨率映射到 HD 档`）。保留 SD 条目是为了让 640×480 这类分辨率有一个可读的档位名，系数与 HD 一致。
 >
-> ⚠️ `ultraLowLatency` 的 Full HD / 2K / 2K+ 值（4.57 / 8 / 18）**沿用上游现值**，但与我从官方文档抓到的值不一致，需要人工核对 —— 见 [open-questions.md](./open-questions.md)。
+> ⚠️ 上表的 `ultraLowLatency` 值是**官方文档确认值**，注意 **Full HD 为 `4.5`，上游现值 `4.57` 是错的**（5 次独立抽取全部一致）。`2K` 与 `2K+` 从公开文档无法完全收敛（3:2 分歧），当前取值依据「极速直播系数 = 互动直播系数的一半」这一关系。**这些系数一律可配，最终应以你自己账号的声网控制台账单为准校准** —— 详见 [open-questions.md](./open-questions.md) 第 4 节。
 
 `audio_coefficients`：
 

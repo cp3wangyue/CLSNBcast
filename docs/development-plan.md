@@ -129,7 +129,7 @@ npm run verify        # = typecheck + build + test
   - [ ] `viewer_duration_ms` 改为由 `usage_intervals` 的 viewer 区间求和写入
   - [ ] `toInfo()` 的系数与单价改读 `quality_config`（不再是硬编码常量）
   - [ ] 档位改为「优先读会话快照的 `tier`，回退 preset 反查」
-  - [ ] 回归对比：同一批会话，改造前后 `estimatedCost` 应**完全一致**（因为系数默认沿用现值、口径未变）
+  - [ ] 回归对比：除 **Full HD 极速直播系数由 `4.57` 修正为 `4.5`**（已确认的官方值，见 [open-questions.md](./open-questions.md) §4）导致的约 1.5% 差异外，其余会话的 `estimatedCost` 应与改造前**一致**
 - [ ] **2-4 quota 强制与用量看板**
   - [ ] quota 判断读 `provider_usage_monthly`（O(1)）
   - [ ] 达到阈值 → **停止分配新会话**，不中断进行中的会话
