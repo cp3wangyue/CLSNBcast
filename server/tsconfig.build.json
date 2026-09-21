@@ -1,4 +1,18 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"]
+  "compilerOptions": {
+    // 显式固定 rootDir，避免输出目录结构随「新增了根目录下的 .ts 文件」而漂移。
+    // 没有它时 tsc 会把 rootDir 推断为所有输入文件的公共父目录：一旦 server/ 根目录下
+    // 多出一个 .ts（例如 vitest.config.ts），产物就会从 dist/main.js 变成 dist/src/main.js，
+    // 直接打断 Dockerfile 的 CMD 与 deploy.sh 的存在性检查。
+    "rootDir": "./src"
+  },
+  "exclude": [
+    "node_modules",
+    "test",
+    "dist",
+    "**/*spec.ts",
+    // 构建配置不属于运行时代码，且位于 rootDir 之外
+    "vitest.config.ts"
+  ]
 }

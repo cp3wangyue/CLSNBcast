@@ -31,17 +31,23 @@ npm run verify        # = typecheck + build + test
 
 ### 任务
 
-- [ ] **0-1 测试与类型检查基础设施**
-  - [ ] 选定测试框架并接入 server 与 web（建议统一用 **vitest**，减少工具种类）
-  - [ ] 三个 `package.json` 加 `typecheck` / `test` 脚本
-  - [ ] 根 `package.json` 加 `verify` = `typecheck` + `build` + `test`
-  - [ ] 写第一批测试：`SecretCryptoService` 与 `QualityValidationService` 的纯函数
-  - [ ] 说明：服务端 `tsconfig.json` 当前是 `strictNullChecks: false` / `noImplicitAny: false`，**先不要一次性收紧**（会把改动面炸开），留到后续单独评估
-- [ ] **0-2 版本化 migration**
-  - [ ] 建 `schema_migrations` 表（见 [data-model-design.md](./data-model-design.md) 第 5 节）
-  - [ ] 建 `server/src/modules/database/migrations/` 目录与注册表
-  - [ ] 把现有 `migrate()` 的全部内容包装为 `version 1: baseline`，**完全保留其幂等语义**
-  - [ ] 加一个迁移框架的单测（模拟「新库」与「已有库」两条路径）
+- [x] **0-1 测试与类型检查基础设施**
+  - [x] 选定测试框架并接入 server 与 web（统一用 **vitest**，减少工具种类）
+  - [x] 三个 `package.json` 加 `typecheck` / `test` 脚本
+  - [x] 根 `package.json` 加 `verify` = `typecheck` + `build` + `test`
+  - [x] 写第一批测试：先覆盖既有纯函数（`session.types` 计费系数与档位、`utils` 类名合并），
+        `SecretCryptoService` 与 `QualityValidationService` 的测试随 0-3 与 Phase 3 补
+  - [x] 服务端 `tsconfig.json` 保持 `strictNullChecks: false` / `noImplicitAny: false`，**未一次性收紧**，留到后续单独评估
+  - [x] 说明：vitest 锁在 `^3`（vitest 5 要求 vite ≥6，而 web 在 vite 5.4.10）
+- [x] **0-2 版本化 migration**
+  - [x] 建 `schema_migrations` 表（见 [data-model-design.md](./data-model-design.md) 第 5 节）
+  - [x] 建 `server/src/modules/database/migrations/` 目录与注册表
+  - [x] 把现有 `migrate()` 的全部内容包装为 `version 1: baseline`，**完全保留其幂等语义**
+  - [x] 加一个迁移框架的单测（模拟「新库」与「已有库」两条路径）
+  - [x] ⚠️ 顺带修一个被 E2E 验证抓到的回归：在 `server/` 根目录新增 `vitest.config.ts`
+        会把 tsc 推断的 `rootDir` 上移，产物从 `dist/main.js` 变成 `dist/src/main.js`，
+        直接打断 `Dockerfile` 的 `CMD` 与 `deploy.sh` 的存在性检查。已在
+        `server/tsconfig.build.json` 显式固定 `rootDir: "./src"` 并排除构建配置
 - [ ] **0-3 `SecretCryptoService`**
   - [ ] AES-256-GCM + 随机 IV + `v1:<iv>:<tag>:<ct>` 版本前缀
   - [ ] `SECRET_ENCRYPTION_KEY` 环境变量 + 启动门禁（有密文但无密钥 → fatal 退出）
@@ -50,9 +56,11 @@ npm run verify        # = typecheck + build + test
 
 ### 验收
 
-- [ ] `npm run verify` 通过
-- [ ] 用现有 `data/clsnbcast.db` 启动一次，确认 baseline migration 记录为已应用，且**表结构无变化**
-- [ ] 删除 `data/` 后启动，确认新库结构与原有一致
+- [x] `npm run verify` 通过
+- [x] 用真实 SQLite 文件跑通三条路径：新库建库、存量库（无 `schema_migrations`）接管且数据无损、
+      重复启动幂等
+- [x] 确认 `server/dist/main.js` 存在（部署契约）
+- [ ] Phase 0 全部完成后：删除 `data/` 后启动，确认新库结构与原有一致
 
 ### commit 划分
 
