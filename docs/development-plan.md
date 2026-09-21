@@ -117,17 +117,34 @@ npm run verify        # = typecheck + build + test
         清空必须与 Token 签发切换同一 commit（见 1-3）
   - [x] 单测 11 个：迁移与加密落库、会话回填、三次启动仍只有一个 Provider、无密钥时告警跳过、
         多服务器各自迁移、坏数据隔离、空名兜底、过期时间夹取、日志不含明文
-- [ ] **1-3 Token 签发改造（修复 App ID 漂移）**
-  - [ ] `generateToken(session, uid, role)` 取代 `generateToken(channel, uid, role, serverId)`
-  - [ ] App ID 一致性断言 + `PROVIDER_APPID_CHANGED` 错误码
-  - [ ] 更新调用点 `share.controller.ts:47-48`
-  - [ ] **保持 `AgoraTokenResponse` 结构不变**（`{token, channel, uid, appId, expireSec}`）
-  - [ ] 单测：provider App ID 与会话快照不一致时必须抛错
-- [ ] **1-4 Provider 解析策略**
-  - [ ] `resolveForSession`（显式 / space 默认 / user BYOK / 平台池优先级）
-  - [ ] 失败码 `NO_PROVIDER` / `NOT_AUTHORIZED` / `QUOTA_EXCEEDED`
-  - [ ] 会话创建流程接线
-  - [ ] 单测：四种解析路径 + 三种失败路径
+- [x] **1-3 Token 签发改造（修复 App ID 漂移）**
+  - [x] `generateToken(session, uid, role)` 取代 `generateToken(channel, uid, role, serverId)`
+  - [x] 从**会话快照**读取 Provider 与 App ID，不再实时查服务器配置
+  - [x] App ID 一致性断言 + `PROVIDER_APPID_CHANGED` 错误码（附 `SESSION_PROVIDER_MISSING` /
+        `PROVIDER_UNAVAILABLE` / `PROVIDER_NO_CERTIFICATE`）
+  - [x] 更新调用点 `share.controller.ts`；删除原「返回空 appId 让前端自己猜」的分支
+  - [x] **保持 `AgoraTokenResponse` 结构不变**（`{token, channel, uid, appId, expireSec}`），前端零改动
+  - [x] 会话参数类型用结构化 `TokenSessionRef`，`ServerSession` 与 `ShareSession` 都满足，
+        调用方无需类型转换
+  - [x] 清空 `servers.agora_app_certificate`（与签发切换同一 commit，旧路径已无消费者）
+  - [x] 单测 20 个：结构与旧实现一致、发布/观众 token 不同、漂移时**发布端与观众端都被拒绝**、
+        漂移日志含两个 App ID 便于排查、改回后恢复可用、`updateSession` 改不动绑定列、
+        `bindSessionProvider` 只能绑一次、响应与日志与错误信息均不含证书
+- [x] **1-4 Provider 解析策略**
+  - [x] `resolveForSession`：显式指定 → space 默认 → user BYOK → 平台池（按 priority 升序）
+  - [x] 失败码 `NO_PROVIDER` / `NOT_AUTHORIZED` / `QUOTA_EXCEEDED`，message 为面向用户的文案
+  - [x] 显式指定的权限校验：平台池仅管理员可指定；space / user 必须归属匹配
+  - [x] 跳过已停用、`unhealthy`、无证书、超配额的 Provider；`degraded` 仍可用
+  - [x] 会话创建流程接线；`SessionService.createSession` 抛 `ProviderUnavailableError`，
+        KOOK 侧捕获后给用户明确提示（不再创建「注定不可用」的会话）
+  - [x] 配额判断读账本汇总缓存，且**跨月后把过期估算值视为 0**
+        （否则跑满过的 Provider 会永久被拦截）；周期键用 `Intl` 按时区计算，不用本地 `getMonth()`
+  - [x] 单测：解析 4 条路径 + 3 种失败路径 + 跳过规则 + 配额边界（共 30 个）
+  - [x] ⚠️ 判别字段用**字符串字面量**而非布尔 `ok`：本仓库 `strictNullChecks: false` 会把
+        布尔字面量放宽为 `boolean`，导致联合类型无法判别收窄
+- [x] **端到端验证（真实 DI 容器 + 真实数据库）**：16 项断言全部通过 —— 存量明文凭证被迁移并清空、
+  证书可解密、管理端视图无明文、会话绑定 Provider 并快照 App ID、发布/观众端均可签发、
+  **改 App ID 后活跃会话被拒绝且提示面向用户**、新会话使用新 App ID 正常工作
 - [ ] **1-5 管理端 API 与 UI**
   - [ ] 超管：Provider 全量 CRUD、优先级、quota 配置
   - [ ] 服务器管理员：为自身 space 配置 BYOK

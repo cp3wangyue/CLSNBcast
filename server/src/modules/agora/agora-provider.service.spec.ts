@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseService } from '../database/database.service';
 import { SecretCryptoService } from '../crypto/secret-crypto.service';
 import { AgoraProviderService, AgoraProviderValidationError } from './agora-provider.service';
+import { currentPeriodKey } from './provider-quota';
 
 const HEX_KEY = 'a'.repeat(64);
 const APP_ID = '0123456789abcdef0123456789abcdef';
@@ -450,11 +451,27 @@ describe('AgoraProviderService', () => {
       expect(service.listForAdminByOwner('space', 'guild-1')).toHaveLength(1);
     });
 
-    it('不清空服务器的明文证书（旧 Token 路径仍在读它，Phase 1-3 才清）', () => {
+    it('迁移后清空服务器上的明文证书（秘密不得明文落盘）', () => {
       seedLegacyServer('guild-1');
       service.onModuleInit();
 
-      expect(db.getServer('guild-1')!.agoraAppCertificate).toBe(CERT);
+      expect(db.getServer('guild-1')!.agoraAppCertificate).toBe('');
+      // 证书没有丢：仍能从 Provider 里解出
+      const provider = service.listForAdminByOwner('space', 'guild-1')[0];
+      expect(service.getWithSecrets(provider.id)!.appCertificate).toBe(CERT);
+    });
+
+    it('Provider 已存在但明文残留时，启动会清掉残留', () => {
+      seedLegacyServer('guild-1');
+      service.onModuleInit();
+
+      // 模拟「上次迁移成功、但清空明文这一步失败」
+      db.updateServer('guild-1', { agoraAppCertificate: CERT });
+      service.onModuleInit();
+
+      expect(db.getServer('guild-1')!.agoraAppCertificate).toBe('');
+      // 不会因此多出一个 Provider
+      expect(service.listForAdminByOwner('space', 'guild-1')).toHaveLength(1);
     });
 
     it('没有主密钥时跳过迁移并告警（而不是崩溃）', () => {
@@ -524,6 +541,244 @@ describe('AgoraProviderService', () => {
       for (const call of logSpy.mock.calls) {
         expect(call.map(String).join(' ')).not.toContain(CERT);
       }
+    });
+  });
+
+  // ===== 会话创建时的 Provider 解析 =====
+
+  describe('resolveForSession', () => {
+    const SERVER = 'guild-1';
+    const SHARER = 'kook-user-1';
+
+    function make(overrides: Record<string, unknown> = {}) {
+      return service.create(baseCreate(overrides));
+    }
+
+    function resolve(overrides: Partial<Parameters<typeof service.resolveForSession>[0]> = {}) {
+      return service.resolveForSession({ serverId: SERVER, sharerUserId: SHARER, ...overrides });
+    }
+
+    it('没有任何 Provider 时返回 NO_PROVIDER，并给出面向用户的文案', () => {
+      const result = resolve();
+      expect(result.status).toBe('failed');
+      if (result.status !== 'failed') throw new Error('unreachable');
+      expect(result.code).toBe('NO_PROVIDER');
+      expect(result.message).toContain('尚未配置可用的声网 Provider');
+    });
+
+    describe('优先级：space 默认 > user BYOK > 平台池', () => {
+      it('三者都存在时选 space 默认', () => {
+        make({ name: 'platform', ownerType: 'platform', priority: 1 });
+        make({ name: 'byok', ownerType: 'user', ownerId: SHARER, priority: 2 });
+        const space = make({ name: 'space', ownerType: 'space', ownerId: SERVER, priority: 3 });
+
+        const result = resolve();
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') throw new Error('unreachable');
+        expect(result.provider.id).toBe(space.id);
+        expect(result.reason).toBe('space-default');
+      });
+
+      it('没有 space 时选 user BYOK', () => {
+        make({ name: 'platform', ownerType: 'platform', priority: 1 });
+        const byok = make({ name: 'byok', ownerType: 'user', ownerId: SHARER, priority: 2 });
+
+        const result = resolve();
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') throw new Error('unreachable');
+        expect(result.provider.id).toBe(byok.id);
+        expect(result.reason).toBe('user-byok');
+      });
+
+      it('只剩平台池时选平台池中 priority 最小的', () => {
+        make({ name: 'platform-slow', ownerType: 'platform', priority: 50 });
+        const fast = make({ name: 'platform-fast', ownerType: 'platform', priority: 5 });
+
+        const result = resolve();
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') throw new Error('unreachable');
+        expect(result.provider.id).toBe(fast.id);
+        expect(result.reason).toBe('platform-pool');
+      });
+
+      it('别人的 space / user Provider 不会被误用', () => {
+        make({ name: 'other-space', ownerType: 'space', ownerId: 'guild-other' });
+        make({ name: 'other-user', ownerType: 'user', ownerId: 'someone-else' });
+
+        expect(resolve().status).toBe('failed');
+      });
+    });
+
+    describe('跳过不可用的 Provider', () => {
+      it('跳过已停用的，回退到下一个', () => {
+        const disabled = make({ name: 'disabled-space', ownerType: 'space', ownerId: SERVER });
+        service.update(disabled.id, { enabled: false });
+        const fallback = make({ name: 'platform', ownerType: 'platform' });
+
+        const result = resolve();
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') throw new Error('unreachable');
+        expect(result.provider.id).toBe(fallback.id);
+      });
+
+      it('跳过健康检查未通过的', () => {
+        const sick = make({ name: 'sick', ownerType: 'space', ownerId: SERVER });
+        db.updateProvider(sick.id, { healthStatus: 'unhealthy' });
+        const fallback = make({ name: 'platform', ownerType: 'platform' });
+
+        const result = resolve();
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') throw new Error('unreachable');
+        expect(result.provider.id).toBe(fallback.id);
+      });
+
+      it('degraded 仍可用（只是性能下降，不该停用）', () => {
+        const degraded = make({ name: 'degraded', ownerType: 'space', ownerId: SERVER });
+        db.updateProvider(degraded.id, { healthStatus: 'degraded' });
+
+        const result = resolve();
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') throw new Error('unreachable');
+        expect(result.provider.id).toBe(degraded.id);
+      });
+
+      it('跳过没有证书的 Provider', () => {
+        const noCert = make({ name: 'no-cert', ownerType: 'space', ownerId: SERVER });
+        db.updateProvider(noCert.id, { appCertificateEnc: '' });
+
+        expect(resolve().status).toBe('failed');
+      });
+    });
+
+    describe('配额', () => {
+      const currentKey = currentPeriodKey();
+
+      it('已超配额的被跳过，回退到未超配额的', () => {
+        const full = make({ name: 'full', ownerType: 'space', ownerId: SERVER });
+        db.updateProvider(full.id, {
+          monthlyQuotaStandardMinutes: 100,
+          quotaEnforced: 1,
+          estimatedUsageStandardMinutes: 100,
+          usagePeriodKey: currentKey,
+        });
+        const spare = make({ name: 'spare', ownerType: 'platform' });
+
+        const result = resolve();
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') throw new Error('unreachable');
+        expect(result.provider.id).toBe(spare.id);
+      });
+
+      it('全部超配额时返回 QUOTA_EXCEEDED', () => {
+        const full = make({ name: 'full', ownerType: 'space', ownerId: SERVER });
+        db.updateProvider(full.id, {
+          monthlyQuotaStandardMinutes: 100,
+          quotaEnforced: 1,
+          estimatedUsageStandardMinutes: 100,
+          usagePeriodKey: currentKey,
+        });
+
+        const result = resolve();
+        expect(result.status).toBe('failed');
+        if (result.status !== 'failed') throw new Error('unreachable');
+        expect(result.code).toBe('QUOTA_EXCEEDED');
+      });
+
+      it('未开启强制时不拦截', () => {
+        const p = make({ name: 'soft', ownerType: 'space', ownerId: SERVER });
+        db.updateProvider(p.id, {
+          monthlyQuotaStandardMinutes: 100,
+          quotaEnforced: 0,
+          estimatedUsageStandardMinutes: 99999,
+          usagePeriodKey: currentKey,
+        });
+
+        expect(resolve().status).toBe('ok');
+      });
+
+      it('估算值属于上一周期时不算超配额', () => {
+        const p = make({ name: 'stale', ownerType: 'space', ownerId: SERVER });
+        db.updateProvider(p.id, {
+          monthlyQuotaStandardMinutes: 100,
+          quotaEnforced: 1,
+          estimatedUsageStandardMinutes: 99999,
+          usagePeriodKey: '2020-01',
+        });
+
+        expect(resolve().status).toBe('ok');
+      });
+    });
+
+    describe('显式指定', () => {
+      it('普通用户不能显式指定平台池 Provider', () => {
+        const p = make({ name: 'platform', ownerType: 'platform' });
+
+        const result = resolve({ requestedProviderId: p.id, allowExplicitSelection: false });
+        expect(result.status).toBe('failed');
+        if (result.status !== 'failed') throw new Error('unreachable');
+        expect(result.code).toBe('NOT_AUTHORIZED');
+      });
+
+      it('管理员可以显式指定平台池 Provider', () => {
+        const p = make({ name: 'platform', ownerType: 'platform' });
+
+        const result = resolve({ requestedProviderId: p.id, allowExplicitSelection: true });
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') throw new Error('unreachable');
+        expect(result.provider.id).toBe(p.id);
+        expect(result.reason).toBe('explicit');
+      });
+
+      it('可以显式指定本服务器的 space Provider', () => {
+        const p = make({ name: 'space', ownerType: 'space', ownerId: SERVER });
+
+        const result = resolve({ requestedProviderId: p.id });
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') throw new Error('unreachable');
+        expect(result.reason).toBe('explicit');
+      });
+
+      it('不能显式指定别的服务器的 space Provider', () => {
+        const p = make({ name: 'other', ownerType: 'space', ownerId: 'guild-other' });
+
+        const result = resolve({ requestedProviderId: p.id });
+        expect(result.status).toBe('failed');
+        if (result.status !== 'failed') throw new Error('unreachable');
+        expect(result.code).toBe('NOT_AUTHORIZED');
+      });
+
+      it('可以显式指定自己的 BYOK Provider', () => {
+        const p = make({ name: 'byok', ownerType: 'user', ownerId: SHARER });
+
+        const result = resolve({ requestedProviderId: p.id });
+        expect(result.status).toBe('ok');
+        if (result.status !== 'ok') throw new Error('unreachable');
+        expect(result.reason).toBe('explicit');
+      });
+
+      it('不能显式指定别人的 BYOK Provider', () => {
+        const p = make({ name: 'byok', ownerType: 'user', ownerId: 'someone-else' });
+
+        const result = resolve({ requestedProviderId: p.id });
+        expect(result.status).toBe('failed');
+        if (result.status !== 'failed') throw new Error('unreachable');
+        expect(result.code).toBe('NOT_AUTHORIZED');
+      });
+
+      it('指定的 Provider 不存在时返回 NO_PROVIDER', () => {
+        const result = resolve({ requestedProviderId: 'nope' });
+        expect(result.status).toBe('failed');
+        if (result.status !== 'failed') throw new Error('unreachable');
+        expect(result.code).toBe('NO_PROVIDER');
+      });
+
+      it('显式指定的 Provider 已停用时失败，不会悄悄换别的', () => {
+        const p = make({ name: 'platform', ownerType: 'platform' });
+        service.update(p.id, { enabled: false });
+
+        const result = resolve({ requestedProviderId: p.id, allowExplicitSelection: true });
+        expect(result.status).toBe('failed');
+      });
     });
   });
 });

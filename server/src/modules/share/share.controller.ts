@@ -44,16 +44,11 @@ export class ShareController {
   token(@Req() req: any, @Query('role') role: string) {
     const r: AgoraRole = role === 'publisher' ? 'publisher' : 'subscriber';
     const uid = r === 'publisher' ? 1 : Math.floor(Math.random() * 99999) + 100;
-    const serverId = req.session.guildId || '';
-    const result = this.agora.generateToken(req.session.channel, uid, r, serverId);
-    if (!result.appId) {
-      this.logger.warn(`token endpoint: appId not configured for serverId=${serverId}`);
-      throw new HttpException(
-        { message: '该服务器尚未配置 Agora App ID，请联系服务器管理员在管理面板中配置', code: 'AGORA_NOT_CONFIGURED' },
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-    return result;
+    // generateToken 从会话快照读取 Provider 与 App ID，保证同一会话的发布端与所有
+    // 观众端始终落在同一个声网项目上。失败时抛带 code 的 400
+    // （SESSION_PROVIDER_MISSING / PROVIDER_APPID_CHANGED / PROVIDER_UNAVAILABLE 等），
+    // 不再返回空 appId 让前端自己猜。
+    return this.agora.generateToken(req.session, uid, r);
   }
 
   @Post('start')

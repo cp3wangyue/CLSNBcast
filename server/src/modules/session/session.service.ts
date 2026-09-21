@@ -3,8 +3,24 @@ import { Interval } from '@nestjs/schedule';
 import { randomBytes, randomUUID } from 'crypto';
 import { DatabaseService, ServerSession } from '../database/database.service';
 import { AgoraService } from '../agora/agora.service';
+import { AgoraProviderService } from '../agora/agora-provider.service';
 import { EventBusService } from '../events/events.service';
 import { SessionStatus, ShareSession, SessionInfo, getQualityInfo, getAudioCoefficient, getVideoCoefficient, STANDARD_MINUTE_PRICE } from './session.types';
+
+/**
+ * 会话创建时选不出可用的 Agora Provider。
+ *
+ * `message` 是面向用户的文案，调用方（KOOK 卡片 / 分享接口）应直接展示。
+ */
+export class ProviderUnavailableError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ProviderUnavailableError';
+  }
+}
 
 interface ViewerPresence {
   connections: number;
@@ -29,6 +45,7 @@ export class SessionService implements OnModuleInit {
   constructor(
     private readonly db: DatabaseService,
     private readonly agora: AgoraService,
+    private readonly providers: AgoraProviderService,
     private readonly bus: EventBusService,
   ) {}
 
@@ -124,15 +141,30 @@ export class SessionService implements OnModuleInit {
     manualCreated?: boolean;
     quality?: string;
     serverId?: string;
+    /** 手动指定的 Provider；不传则按「服务器默认 → 用户 BYOK → 平台池」自动解析 */
+    providerId?: string;
   }): ShareSession {
     const id = randomUUID();
     const shortId = id.replace(/-/g, '').slice(0, 12);
     const token = randomBytes(32).toString('hex');
     const now = Date.now();
+    const serverId = params.serverId || params.guildId || '';
 
-    // Get server config for Agora channel name generation
-    const serverConfig = params.serverId ? this.db.getServer(params.serverId) : null;
-    const agoraAppId = serverConfig?.agoraAppId || '';
+    // 会话创建时**固定选定**一个 Provider，并记录 App ID 快照。
+    // 此后该会话的发布端与所有观众端都必须使用同一个 Provider / App ID / Channel，
+    // 中途不允许更换（否则观众会被发到另一个声网项目却毫无提示）。
+    const resolution = this.providers.resolveForSession({
+      serverId,
+      sharerUserId: params.sharerUserId,
+      requestedProviderId: params.providerId,
+    });
+    if (resolution.status === 'failed') {
+      this.logger.warn(
+        `createSession: no usable Agora provider for server=${serverId || '(unknown)'} ` +
+          `sharer=${params.sharerUserId || '(unknown)'}: ${resolution.code}`,
+      );
+      throw new ProviderUnavailableError(resolution.code, resolution.message);
+    }
 
     const session: ShareSession = {
       id,
@@ -158,14 +190,15 @@ export class SessionService implements OnModuleInit {
       graceReason: null,
       lastViewerAt: null,
       lowLatency: false,
-      // Provider 绑定由 resolveForSession 决定，在 Phase 1-2 接入。
-      // 在此之前保持未绑定（providerId 为空），Token 签发仍走原有的 serverId 路径。
-      providerId: '',
-      agoraAppId,
+      providerId: resolution.provider.id,
+      agoraAppId: resolution.provider.appId,
     };
 
-    const serverId = params.serverId || params.guildId || '';
     this.db.createSession(this.toDb(session, serverId));
+    this.logger.log(
+      `createSession: ${session.id} bound to provider ${resolution.provider.id} ` +
+        `(${resolution.reason}, appId=${resolution.provider.appId})`,
+    );
     return session;
   }
 

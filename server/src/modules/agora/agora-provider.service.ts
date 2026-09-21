@@ -7,6 +7,7 @@ import {
   DatabaseService,
 } from '../database/database.service';
 import { SecretCryptoService } from '../crypto/secret-crypto.service';
+import { DEFAULT_USAGE_TIMEZONE, evaluateQuota } from './provider-quota';
 
 /** 管理端可见的 Provider 视图。**绝不含任何明文秘密。** */
 export interface AgoraProviderAdminView {
@@ -94,6 +95,40 @@ export class AgoraProviderValidationError extends Error {
   }
 }
 
+/** Provider 解析失败的原因。 */
+export type ProviderResolutionFailureCode = 'NO_PROVIDER' | 'NOT_AUTHORIZED' | 'QUOTA_EXCEEDED';
+
+/** 命中的解析层级，便于排查「这个会话为什么用了那个 Provider」。 */
+export type ProviderResolutionReason = 'explicit' | 'space-default' | 'user-byok' | 'platform-pool';
+
+export interface ResolveProviderInput {
+  /** KOOK 服务器 ID（`servers.server_id`） */
+  serverId: string;
+  /** 分享者 KOOK 用户 ID，用于 BYOK 归属匹配 */
+  sharerUserId: string;
+  /** 手动指定的 Provider */
+  requestedProviderId?: string;
+  /** 调用者是否被允许显式指定 Provider（管理员为 true，普通用户为 false） */
+  allowExplicitSelection?: boolean;
+  /** 计费周期时区，默认 `Asia/Shanghai` */
+  timeZone?: string;
+}
+
+/**
+ * Provider 解析结果。
+ *
+ * ⚠️ 判别字段用**字符串字面量**而不是布尔 `ok`：本仓库 `strictNullChecks: false`，
+ * 布尔字面量类型会被放宽为 `boolean`，导致 TS 无法对联合类型做判别收窄
+ * （`if (!result.ok)` 之后拿不到失败分支的 `code`）。
+ */
+export type ProviderResolution =
+  | { status: 'ok'; provider: AgoraProviderRecord; reason: ProviderResolutionReason }
+  | { status: 'failed'; code: ProviderResolutionFailureCode; message: string };
+
+type UsabilityCheck =
+  | { status: 'ok' }
+  | { status: 'failed'; code: ProviderResolutionFailureCode; message: string };
+
 const OWNER_TYPES: AgoraProviderOwnerType[] = ['platform', 'space', 'user'];
 const MIN_TOKEN_EXPIRE_SEC = 60;
 const MAX_TOKEN_EXPIRE_SEC = 24 * 3600;
@@ -150,7 +185,18 @@ export class AgoraProviderService implements OnModuleInit {
 
     let adopted = 0;
     for (const server of candidates) {
-      if (this.db.listProvidersByOwner('space', server.serverId).length > 0) continue;
+      const existing = this.db.listProvidersByOwner('space', server.serverId);
+      if (existing.length > 0) {
+        // 上次已经迁移过，剩下的明文证书只是残留 —— 直接清掉，并补齐漏掉的会话回填。
+        // 不做这一步的话，明文会永远留在库里（下次启动时该服务器已不在候选列表里）。
+        this.db.backfillSessionsProvider(server.serverId, existing[0].id, existing[0].appId);
+        this.db.clearServerCertificate(server.serverId);
+        this.logger.log(
+          `Cleared residual plaintext Agora certificate of server ${server.serverId} ` +
+            `(provider ${existing[0].id} already holds it encrypted)`,
+        );
+        continue;
+      }
 
       try {
         const provider = this.create({
@@ -170,10 +216,14 @@ export class AgoraProviderService implements OnModuleInit {
           provider.id,
           server.agoraAppId,
         );
+        // 证书已加密存进 Provider，清掉服务器上的明文。
+        // 这一步必须在 Token 签发切到 Provider 之后（同一 commit），否则旧路径会读不到证书。
+        this.db.clearServerCertificate(server.serverId);
+
         adopted += 1;
         this.logger.log(
           `Adopted legacy Agora credentials of server ${server.serverId} as provider ` +
-            `${provider.id} (backfilled ${backfilled} session(s))`,
+            `${provider.id} (backfilled ${backfilled} session(s), plaintext cleared)`,
         );
       } catch (error) {
         // 单个服务器的坏数据不应阻止应用启动，其余服务器仍应完成迁移
@@ -339,6 +389,112 @@ export class AgoraProviderService implements OnModuleInit {
   /** 记录一次成功使用，供「最后使用时间」展示与用量归属。 */
   markUsed(id: string): void {
     this.db.updateProvider(id, { lastUsedAt: Date.now() });
+  }
+
+  // ===== 会话创建时的 Provider 解析 =====
+
+  /**
+   * 为一个新会话选定 Provider。
+   *
+   * 解析优先级（逐级回退，任一级命中即返回）：
+   * 1. **显式指定** —— 手动选择。必须校验调用者有权使用该 Provider。
+   * 2. **服务器默认** `owner_type='space'` 且属于该 serverId
+   * 3. **用户自带** `owner_type='user'` 且属于该 sharerUserId（BYOK）
+   * 4. **平台池** `owner_type='platform'`，按 priority 升序
+   *
+   * 全部不可用时返回失败码，**绝不静默回退到任意 App ID** —— 那会让观众被发到
+   * 一个与分享者不同的声网项目，且完全没有报错。
+   */
+  resolveForSession(input: ResolveProviderInput): ProviderResolution {
+    const timeZone = input.timeZone ?? DEFAULT_USAGE_TIMEZONE;
+
+    // 1. 显式指定
+    if (input.requestedProviderId) {
+      const provider = this.db.getProvider(input.requestedProviderId);
+      if (!provider) {
+        return { status: 'failed', code: 'NO_PROVIDER', message: '指定的声网 Provider 不存在' };
+      }
+      if (!this.isAuthorizedFor(provider, input)) {
+        return { status: 'failed', code: 'NOT_AUTHORIZED', message: '无权使用该声网 Provider' };
+      }
+      const check = this.checkUsable(provider, timeZone);
+      if (check.status === 'failed') return check;
+      return { status: 'ok', provider, reason: 'explicit' };
+    }
+
+    // 2 / 3 / 4. 按候选组依次尝试
+    const groups: { reason: ProviderResolutionReason; list: AgoraProviderRecord[] }[] = [
+      { reason: 'space-default', list: this.db.listProvidersByOwner('space', input.serverId) },
+      { reason: 'user-byok', list: this.db.listProvidersByOwner('user', input.sharerUserId) },
+      { reason: 'platform-pool', list: this.db.listProvidersByOwner('platform', '') },
+    ];
+
+    let sawQuotaExceeded = false;
+    for (const group of groups) {
+      for (const provider of group.list) {
+        const check = this.checkUsable(provider, timeZone);
+        if (check.status === 'ok') return { status: 'ok', provider, reason: group.reason };
+        if (check.code === 'QUOTA_EXCEEDED') sawQuotaExceeded = true;
+      }
+    }
+
+    if (sawQuotaExceeded) {
+      return {
+        status: 'failed',
+        code: 'QUOTA_EXCEEDED',
+        message: '所有可用的声网 Provider 均已达到本月配额上限，请稍后再试或联系管理员',
+      };
+    }
+    return {
+      status: 'failed',
+      code: 'NO_PROVIDER',
+      message:
+        '该服务器尚未配置可用的声网 Provider，请让服务器管理员先配置 App ID 与 App Certificate',
+    };
+  }
+
+  /** 显式指定 Provider 时的权限校验。 */
+  private isAuthorizedFor(provider: AgoraProviderRecord, input: ResolveProviderInput): boolean {
+    switch (provider.ownerType) {
+      case 'platform':
+        // 平台池属于全体用户共享的资源，只有管理员能显式指定
+        return input.allowExplicitSelection === true;
+      case 'space':
+        return provider.ownerId === input.serverId;
+      case 'user':
+        return provider.ownerId === input.sharerUserId;
+      default:
+        return false;
+    }
+  }
+
+  /** Provider 当前是否可用于新会话。 */
+  private checkUsable(provider: AgoraProviderRecord, timeZone: string): UsabilityCheck {
+    if (!provider.enabled) {
+      return { status: 'failed', code: 'NO_PROVIDER', message: `声网 Provider「${provider.name}」已停用` };
+    }
+    if (provider.healthStatus === 'unhealthy') {
+      return {
+        status: 'failed',
+        code: 'NO_PROVIDER',
+        message: `声网 Provider「${provider.name}」健康检查未通过`,
+      };
+    }
+    if (!provider.appCertificateEnc) {
+      return {
+        status: 'failed',
+        code: 'NO_PROVIDER',
+        message: `声网 Provider「${provider.name}」未配置 App Certificate`,
+      };
+    }
+    if (evaluateQuota(provider, timeZone).exceeded) {
+      return {
+        status: 'failed',
+        code: 'QUOTA_EXCEEDED',
+        message: `声网 Provider「${provider.name}」已达到本月配额上限`,
+      };
+    }
+    return { status: 'ok' };
   }
 
   // ===== 视图转换 =====

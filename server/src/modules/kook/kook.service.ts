@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { SessionService } from '../session/session.service';
+import { ProviderUnavailableError, SessionService } from '../session/session.service';
+import { ShareSession } from '../session/session.types';
 import { DatabaseService } from '../database/database.service';
 import { EventBusService } from '../events/events.service';
 import { buildShareLinkCard, buildViewingCard, buildEndedShareCard, buildHelpCard, buildBindCard, buildAlreadyBoundCard, buildBindRequestCard } from './card-builder';
@@ -367,19 +368,57 @@ export class KookService implements OnModuleInit {
     }
   }
 
+  /**
+   * 创建会话，并在「选不出可用的 Agora Provider」时给用户一个明确提示。
+   *
+   * 会话创建现在会固定绑定 Provider（见 SessionService.createSession），所以
+   * 服务器没配凭证时会在这里失败。返回 `undefined` 表示已提示过用户，
+   * 调用方应直接返回，不要继续发卡片。
+   *
+   * 其它异常照旧向上抛，交给 webhook worker 的重试/判死逻辑处理。
+   */
+  private async createSessionOrNotify(
+    params: {
+      sharerUserId: string;
+      sharerUsername: string;
+      guildId: string;
+      targetChannelId: string;
+      serverId?: string;
+      providerId?: string;
+    },
+    notifyChannelId: string,
+    notifyUserId: string,
+  ): Promise<ShareSession | undefined> {
+    try {
+      return this.sessionService.createSession(params);
+    } catch (err) {
+      if (err instanceof ProviderUnavailableError) {
+        this.logger.warn(`createSession rejected (${err.code}): ${err.message}`);
+        await this.sendTempNotice(notifyChannelId, notifyUserId, err.message);
+        return undefined;
+      }
+      throw err;
+    }
+  }
+
   private async handleShareCommand(event: KookMessageEvent, guildId: string, serverConfig: any) {
     const authorId = event.author_id || event.extra?.author?.id || '';
     const authorName = event.extra?.author?.username || 'KOOK用户';
     const channelId =
       event.target_id || event.channel_id || event.extra?.channel_id || '';
 
-    const session = this.sessionService.createSession({
-      sharerUserId: authorId,
-      sharerUsername: authorName,
-      guildId,
-      targetChannelId: channelId,
-      serverId: guildId,  // 使用雪花 ID
-    });
+    const session = await this.createSessionOrNotify(
+      {
+        sharerUserId: authorId,
+        sharerUsername: authorName,
+        guildId,
+        targetChannelId: channelId,
+        serverId: guildId,  // 使用雪花 ID
+      },
+      channelId,
+      authorId,
+    );
+    if (!session) return;
 
     const publicDomain = serverConfig.publicDomain.replace(/\/+$/, '');
     const shareLink = `${publicDomain}/share?t=${session.token}`;
@@ -458,13 +497,18 @@ export class KookService implements OnModuleInit {
       return;
     }
 
-    const session = this.sessionService.createSession({
-      sharerUserId: event.userId,
-      sharerUsername: authorName,
-      guildId,
-      targetChannelId: event.targetId,
-      serverId: guildId,  // 使用雪花 ID
-    });
+    const session = await this.createSessionOrNotify(
+      {
+        sharerUserId: event.userId,
+        sharerUsername: authorName,
+        guildId,
+        targetChannelId: event.targetId,
+        serverId: guildId,  // 使用雪花 ID
+      },
+      event.targetId,
+      event.userId,
+    );
+    if (!session) return;
 
     const publicDomain = serverConfig.publicDomain.replace(/\/+$/, '');
     const shareLink = `${publicDomain}/share?t=${session.token}`;
