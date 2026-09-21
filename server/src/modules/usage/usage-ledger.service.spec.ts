@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseService, ServerSession } from '../database/database.service';
+import { QualityConfigService } from '../quality/quality-config.service';
 import { UsageLedgerService } from './usage-ledger.service';
 import { currentPeriodKey } from './usage-period';
 
@@ -16,6 +17,7 @@ const MS_PER_MINUTE = 60_000;
 describe('UsageLedgerService', () => {
   let dir: string;
   let db: DatabaseService;
+  let qualityConfig: QualityConfigService;
   let ledger: UsageLedgerService;
 
   function seedSession(overrides: Partial<ServerSession> = {}) {
@@ -98,7 +100,9 @@ describe('UsageLedgerService', () => {
     dir = mkdtempSync(join(tmpdir(), 'clsnbcast-ledger-'));
     process.env.DATA_DIR = dir;
     db = new DatabaseService();
-    ledger = new UsageLedgerService(db);
+    qualityConfig = new QualityConfigService(db);
+    qualityConfig.onModuleInit();
+    ledger = new UsageLedgerService(db, qualityConfig);
     seedSession();
   });
 
@@ -121,7 +125,7 @@ describe('UsageLedgerService', () => {
       expect(interval.actorId).toBe('viewer-1');
       expect(interval.tier).toBe('Full HD 全高清');
       expect(interval.billingModel).toBe('ultra_low_latency');
-      expect(interval.coefficient).toBe(4.57);
+      expect(interval.coefficient).toBe(4.5); // 修正后的官方值（上游为 4.5）
       expect(interval.startedAt).toBe(10_000);
       expect(interval.endedAt).toBeNull();
       expect(interval.durationMs).toBeNull();
@@ -222,8 +226,8 @@ describe('UsageLedgerService', () => {
       const [interval] = ledger.listSessionIntervals(SESSION_ID);
       expect(interval.endedAt).toBe(70_000);
       expect(interval.durationMs).toBe(60_000);
-      // 60s × 4.57 = 274.2s
-      expect(interval.standardMs).toBeCloseTo(60_000 * 4.57, 6);
+      // 60s × 4.5 = 274.2s
+      expect(interval.standardMs).toBeCloseTo(60_000 * 4.5, 6);
       expect(interval.closedReason).toBe('viewer_left');
     });
 
@@ -279,7 +283,7 @@ describe('UsageLedgerService', () => {
         sessionId: SESSION_ID, role: 'viewer', actorId: 'viewer-1',
         endedAt: 40_000, reason: 'tier_change',
       });
-      openViewer('viewer-1', 40_000, 'Full HD 全高清', false); // 系数 4.57
+      openViewer('viewer-1', 40_000, 'Full HD 全高清', false); // 系数 4.5
 
       const intervals = ledger.listSessionIntervals(SESSION_ID);
       expect(intervals).toHaveLength(2);
@@ -287,7 +291,7 @@ describe('UsageLedgerService', () => {
       expect(intervals[0].coefficient).toBe(2);
       expect(intervals[0].closedReason).toBe('tier_change');
       expect(intervals[1].tier).toBe('Full HD 全高清');
-      expect(intervals[1].coefficient).toBe(4.57);
+      expect(intervals[1].coefficient).toBe(4.5);
       expect(intervals[1].endedAt).toBeNull();
     });
   });
@@ -442,7 +446,7 @@ describe('UsageLedgerService', () => {
         sessionId: SESSION_ID, role: 'publisher', actorId: 'sharer-1',
         endedAt: MS_PER_MINUTE, reason: 'session_end',
       });
-      // 观众 120s × 系数 4.57 = 9.14 标准分钟
+      // 观众 120s × 系数 4.5 = 9.14 标准分钟
       openViewer('viewer-1', 0);
       ledger.closeInterval({
         sessionId: SESSION_ID, role: 'viewer', actorId: 'viewer-1',
@@ -454,7 +458,7 @@ describe('UsageLedgerService', () => {
       expect(rollup.providerId).toBe(PROVIDER_ID);
       expect(rollup.publisherMinutes).toBeCloseTo(1, 6);
       expect(rollup.viewerMinutes).toBeCloseTo(2, 6);
-      expect(rollup.standardMinutes).toBeCloseTo(1 + 2 * 4.57, 6);
+      expect(rollup.standardMinutes).toBeCloseTo(1 + 2 * 4.5, 6);
       expect(rollup.sessionCount).toBe(1);
     });
 
@@ -478,8 +482,8 @@ describe('UsageLedgerService', () => {
 
       const provider = db.getProvider(PROVIDER_ID)!;
       expect(provider.usagePeriodKey).toBe(periodKey);
-      expect(provider.estimatedUsageStandardMinutes).toBeCloseTo(4.57, 6);
-      expect(ledger.getMonthlyStandardMinutes(PROVIDER_ID, periodKey)).toBeCloseTo(4.57, 6);
+      expect(provider.estimatedUsageStandardMinutes).toBeCloseTo(4.5, 6);
+      expect(ledger.getMonthlyStandardMinutes(PROVIDER_ID, periodKey)).toBeCloseTo(4.5, 6);
     });
 
     it('未关闭的区间不计入汇总（避免把进行中的用量提前结算）', () => {
@@ -512,7 +516,7 @@ describe('UsageLedgerService', () => {
       ledger.rebuildMonthlyRollup(periodKey);
       const second = ledger.rebuildMonthlyRollup(periodKey);
       expect(second).toHaveLength(1);
-      expect(second[0].standardMinutes).toBeCloseTo(4.57, 6);
+      expect(second[0].standardMinutes).toBeCloseTo(4.5, 6);
     });
 
     it('周期键按配置时区归属（UTC 8/31 17:00 = 上海 9/1 → 9 月）', () => {

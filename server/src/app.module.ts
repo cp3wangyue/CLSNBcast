@@ -4,6 +4,7 @@ import { DatabaseModule } from './modules/database/database.module';
 import { CryptoModule } from './modules/crypto/crypto.module';
 import { AgoraModule } from './modules/agora/agora.module';
 import { UsageModule } from './modules/usage/usage.module';
+import { QualityModule } from './modules/quality/quality.module';
 import { SessionModule } from './modules/session/session.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { KookModule } from './modules/kook/kook.module';
@@ -19,6 +20,7 @@ import { NoticesModule } from './modules/notices/notices.module';
     CryptoModule,
     AgoraModule,
     UsageModule,
+    QualityModule,
     SessionModule,
     AuthModule,
     KookModule,

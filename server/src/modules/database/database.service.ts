@@ -315,6 +315,23 @@ export interface ProviderUsageMonthlyRecord {
   updatedAt: number;
 }
 
+// ===== Quality Config =====
+
+/**
+ * `quality_config` 单行表的原始形态。
+ *
+ * JSON 字段保持**字符串**：解析与校验属于 `QualityConfigService` 的职责，
+ * 数据层只负责原样存取（与 Provider 的密文字段同样的分工）。
+ */
+export interface QualityConfigRecord {
+  tierRules: string;
+  audioCoefficients: string;
+  standardMinutePrice: number;
+  usageTimezone: string;
+  limits: string;
+  updatedAt: number;
+}
+
 // ===== Service =====
 
 @Injectable()
@@ -1234,6 +1251,14 @@ export class DatabaseService implements OnModuleDestroy {
     return rows.map((row) => this.mapUsageIntervalRow(row));
   }
 
+  /** 该会话的区间数量。用于区分「账本启用后」与「迁移前的历史会话」。 */
+  countUsageIntervalsBySession(sessionId: string): number {
+    const row = this.db
+      .prepare('SELECT COUNT(*) AS c FROM usage_intervals WHERE session_id = ?')
+      .get(sessionId) as any;
+    return Number(row?.c ?? 0);
+  }
+
   /**
    * **已关闭**区间的时长合计。
    *
@@ -1321,6 +1346,44 @@ export class DatabaseService implements OnModuleDestroy {
       durationMs: Number(row.duration_ms),
       sessionCount: Number(row.sessions),
     }));
+  }
+
+  // ===== Quality Config =====
+
+  getQualityConfig(): QualityConfigRecord | undefined {
+    const row = this.db.prepare('SELECT * FROM quality_config WHERE id = 1').get() as any;
+    if (!row) return undefined;
+    return {
+      tierRules: row.tier_rules,
+      audioCoefficients: row.audio_coefficients,
+      standardMinutePrice: row.standard_minute_price,
+      usageTimezone: row.usage_timezone,
+      limits: row.limits,
+      updatedAt: row.updated_at ?? 0,
+    };
+  }
+
+  /** 写入（或覆盖）单行配置。 */
+  upsertQualityConfig(record: Omit<QualityConfigRecord, 'updatedAt'>): void {
+    this.db.prepare(`
+      INSERT INTO quality_config (
+        id, tier_rules, audio_coefficients, standard_minute_price, usage_timezone, limits, updated_at
+      ) VALUES (1, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        tier_rules            = excluded.tier_rules,
+        audio_coefficients    = excluded.audio_coefficients,
+        standard_minute_price = excluded.standard_minute_price,
+        usage_timezone        = excluded.usage_timezone,
+        limits                = excluded.limits,
+        updated_at            = excluded.updated_at
+    `).run(
+      record.tierRules,
+      record.audioCoefficients,
+      record.standardMinutePrice,
+      record.usageTimezone,
+      record.limits,
+      Date.now(),
+    );
   }
 
   // ===== KOOK Webhook Inbox =====

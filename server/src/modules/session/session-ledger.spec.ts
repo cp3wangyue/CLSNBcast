@@ -9,6 +9,7 @@ import { AgoraProviderService } from '../agora/agora-provider.service';
 import { AgoraService } from '../agora/agora.service';
 import { EventBusService } from '../events/events.service';
 import { UsageLedgerService } from '../usage/usage-ledger.service';
+import { QualityConfigService } from '../quality/quality-config.service';
 import { SessionService } from './session.service';
 import { ShareSession } from './session.types';
 
@@ -29,6 +30,7 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
   let db: DatabaseService;
   let providers: AgoraProviderService;
   let ledger: UsageLedgerService;
+  let qualityConfig: QualityConfigService;
   let sessions: SessionService;
 
   function seedServer() {
@@ -51,9 +53,9 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
   }
 
   /** 建会话并开始共享（ACTIVE）。 */
-  function createActiveSession(clientId = 'client-1'): ShareSession {
+  function createActiveSession(clientId = 'client-1', lowLatency = false): ShareSession {
     const session = createPendingSession();
-    sessions.startSharing(session.token, clientId, false);
+    sessions.startSharing(session.token, clientId, lowLatency);
     return sessions.getByToken(session.token)!;
   }
 
@@ -79,8 +81,10 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
     providers = new AgoraProviderService(db, new SecretCryptoService());
     const agora = new AgoraService(db, providers);
     const bus = new EventBusService();
-    ledger = new UsageLedgerService(db);
-    sessions = new SessionService(db, agora, providers, bus, ledger);
+    qualityConfig = new QualityConfigService(db);
+    qualityConfig.onModuleInit();
+    ledger = new UsageLedgerService(db, qualityConfig);
+    sessions = new SessionService(db, agora, providers, bus, ledger, qualityConfig);
 
     seedServer();
   });
@@ -153,7 +157,7 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
       expect(viewers[0].actorId).toBe('viewer-1');
       expect(viewers[0].endedAt).toBeNull();
       expect(viewers[0].tier).toBe('Full HD 全高清');
-      expect(viewers[0].coefficient).toBe(4.57); // 极速直播 Full HD
+      expect(viewers[0].coefficient).toBe(4.5); // 极速直播 Full HD（修正后的官方值）
     });
 
     it('PENDING 期间加入**不**计费', () => {
@@ -341,5 +345,236 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
 
     // 会话状态仍然正常推进
     expect(sessions.getById(session.id)!.viewerCount).toBe(1);
+  });
+
+  // ===== 计费展示切换到账本（2-3）=====
+
+  describe('计费展示改由账本派生', () => {
+    /** 造一段指定时长的观众观看区间（用显式时间戳，不依赖测试真实耗时）。 */
+    function seedViewerInterval(
+      session: ShareSession,
+      durationMs: number,
+      tier = 'Full HD 全高清',
+      lowLatency = false,
+    ) {
+      const startedAt = Date.now() - durationMs;
+      ledger.openInterval({
+        sessionId: session.id,
+        providerId: session.providerId,
+        serverId: SERVER_ID,
+        role: 'viewer',
+        actorId: 'viewer-1',
+        tier,
+        lowLatency,
+        startedAt,
+      });
+      ledger.closeInterval({
+        sessionId: session.id,
+        role: 'viewer',
+        actorId: 'viewer-1',
+        endedAt: startedAt + durationMs,
+        reason: 'viewer_left',
+      });
+    }
+
+    it('checkpoint 把账本派生的观众时长落盘', () => {
+      const session = createActiveSession();
+      sessions.viewerConnected(session.id, 'viewer-1');
+      sessions.checkpointViewerDurations();
+
+      const row = db.getSessionById(session.id)!;
+      expect(row.viewerDurationMs).toBe(ledger.getViewerDurationMs(session.id));
+    });
+
+    it('🔒 历史会话（账本里没有区间但有落盘时长）使用落盘的时长', () => {
+      const now = Date.now();
+      // 直接造一条「账本启用之前」的会话：有落盘时长，但没有区间
+      db.createSession({
+        id: 'legacy-1', token: 'legacy-tok', channel: 'cb_legacy', serverId: SERVER_ID,
+        sharerUserId: 'u1', sharerUsername: 'u', guildId: SERVER_ID, targetChannelId: 'c1',
+        status: 'ended', viewerCount: 0, peakViewers: 2, totalViewerJoins: 2,
+        viewerDurationMs: 123_456, quality: '1080p_2', cardMessageId: null, manualCreated: 0,
+        createdAt: now - 600_000, startedAt: now - 600_000, endedAt: now,
+        durationMs: 600_000, lastHeartbeat: now,
+        graceStartedAt: null, graceReason: null, lastViewerAt: null,
+        publisherClientId: null, lowLatency: 0, providerId: '', agoraAppId: '',
+      });
+
+      const info = sessions.toInfo(sessions.getById('legacy-1')!);
+
+      expect(info.viewerDurationMs).toBe(123_456);
+      expect(info.standardMinutes).toBeGreaterThan(0);
+    });
+
+    it('🔒 无区间的历史会话走旧估算口径（不误用账本的空结果）', () => {
+      const now = Date.now();
+      db.createSession({
+        id: 'ancient-1', token: 'ancient-tok', channel: 'cb_ancient', serverId: SERVER_ID,
+        sharerUserId: 'u1', sharerUsername: 'u', guildId: SERVER_ID, targetChannelId: 'c1',
+        status: 'ended', viewerCount: 0, peakViewers: 2, totalViewerJoins: 2,
+        viewerDurationMs: 0, quality: '1080p_2', cardMessageId: null, manualCreated: 0,
+        createdAt: now - 600_000, startedAt: now - 600_000, endedAt: now,
+        durationMs: 600_000, lastHeartbeat: now,
+        graceStartedAt: null, graceReason: null, lastViewerAt: null,
+        publisherClientId: null, lowLatency: 0, providerId: '', agoraAppId: '',
+      });
+
+      const info = sessions.toInfo(sessions.getById('ancient-1')!);
+
+      // 账本里没有区间 → 用旧口径（峰值人数 × 时长 × 当前档位系数）推算，而不是 0
+      expect(info.viewerDurationMs).toBe(0);
+      expect(info.standardMinutes).toBeGreaterThan(0);
+      expect(info.billingDetail).toContain('主播分');
+    });
+
+    it('新会话的观众时长来自账本区间', () => {
+      const session = createActiveSession();
+      seedViewerInterval(session, 600_000); // 10 分钟
+      sessions.endSession(session.id, 'manual');
+
+      const info = sessions.toInfo(sessions.getById(session.id)!);
+      expect(info.viewerDurationMs).toBe(600_000);
+      expect(info.billingDetail).not.toContain('旧记录估算');
+    });
+
+    it('🔑 单价来自可配置项：改单价后 estimatedCost 跟着变', () => {
+      const session = createEndedSessionWithViewing(3_600_000); // 1 小时观看
+
+      const before = sessions.toInfo(session);
+      expect(before.standardMinutes).toBeGreaterThan(200);
+
+      qualityConfig.update({ standardMinutePrice: 0.014 });
+      const after = sessions.toInfo(session);
+
+      // 标准时长不变，费用约翻倍（标准时长向上取整，因此只能近似比较）
+      expect(after.standardMinutes).toBe(before.standardMinutes);
+      expect(after.estimatedCost / before.estimatedCost).toBeCloseTo(2, 1);
+    });
+
+    it('🔒 改折算系数不会改写**已结算**的区间（快照语义）', () => {
+      const session = createEndedSessionWithViewing(3_600_000); // 1 小时 × 系数 4.5
+      const before = sessions.toInfo(session);
+
+      // 把极速直播 Full HD 系数从 4.5 降到 1
+      qualityConfig.update({
+        tierRules: qualityConfig.get().tierRules.map((rule) =>
+          rule.tier === 'Full HD 全高清' ? { ...rule, ultraLowLatency: 1 } : rule,
+        ),
+      });
+
+      const after = sessions.toInfo(session);
+      // 已结算的区间保持原样 —— 否则历史账单会被事后改写
+      expect(after.standardMinutes).toBe(before.standardMinutes);
+      expect(after.estimatedCost).toBe(before.estimatedCost);
+
+      // 但**新开的**区间会用新系数
+      const fresh = createEndedSessionWithViewing(3_600_000, 'client-2');
+      const freshInfo = sessions.toInfo(fresh);
+
+      expect(freshInfo.standardMinutes).toBeLessThan(before.standardMinutes);
+    });
+
+    /**
+     * 造一个**已结束**且有明确观看时长的会话，全部时间戳显式指定。
+     *
+     * 不能依赖真实耗时：`standardMinutes` 由 `durationMs`(endedAt - startedAt) 开门，
+     * 测试跑得太快时它会是 0，导致断言随机失败。
+     */
+    function createEndedSessionWithViewing(
+      viewerMs: number,
+      clientId = 'client-1',
+      tier = 'Full HD 全高清',
+      lowLatency = false,
+    ): ShareSession {
+      const now = Date.now();
+      const startedAt = now - viewerMs;
+      const session = createActiveSession(clientId, lowLatency);
+
+      // 用显式时间戳覆盖：会话时间窗 == 观众观看时长
+      db.updateSession(session.id, { startedAt });
+      seedViewerInterval(session, viewerMs, tier, lowLatency);
+
+      const updated = sessions.getById(session.id)!;
+      sessions.endSession(session.id, 'manual');
+      return sessions.getById(updated.id)!;
+    }
+
+    /**
+     * 端到端账目校验：主播与观众的贡献之和应等于手算结果。
+     *
+     * 注意 `startedAt` 必须在 `startSharing` **之前**写定 ——
+     * 主播区间用的是 `session.startedAt`，事后才改它不会回溯修改已开的区间
+     * （这是快照语义的一部分，不是缺陷）。
+     */
+    it('✅ 端到端账目：1 小时 Full HD 极速直播 = 主播 60 + 观众 270 标准分钟', () => {
+      const HOUR = 3_600_000;
+      const startedAt = Date.now() - HOUR;
+
+      const session = createPendingSession();
+      db.updateSession(session.id, { startedAt });
+      sessions.startSharing(session.token, 'client-1', false);
+
+      // 观众看满 1 小时
+      ledger.openInterval({
+        sessionId: session.id,
+        providerId: session.providerId,
+        serverId: SERVER_ID,
+        role: 'viewer',
+        actorId: 'v1',
+        tier: 'Full HD 全高清',
+        lowLatency: false,
+        startedAt,
+      });
+      ledger.closeInterval({
+        sessionId: session.id, role: 'viewer', actorId: 'v1',
+        endedAt: startedAt + HOUR, reason: 'viewer_left',
+      });
+      sessions.endSession(session.id, 'manual');
+
+      const info = sessions.toInfo(sessions.getById(session.id)!);
+
+      // 主播 60min × 系数 1 = 60；观众 60min × 系数 4.5 = 270 → 合计 330
+      expect(info.standardMinutes).toBeGreaterThanOrEqual(330);
+      expect(info.standardMinutes).toBeLessThanOrEqual(331);
+      expect(info.billingDetail).toContain('系数4.5');
+      expect(info.billingDetail).not.toContain('4.57');
+    });
+
+    it('✅ 账单明细显示修正后的 4.5，而不是上游的 4.57', () => {
+      const session = createActiveSession();
+      seedViewerInterval(session, 600_000);
+      sessions.endSession(session.id, 'manual');
+
+      const info = sessions.toInfo(sessions.getById(session.id)!);
+
+      expect(info.billingDetail).toContain('系数4.5');
+      expect(info.billingDetail).not.toContain('4.57');
+    });
+
+    it('低延迟模式在账单明细里标注为互动直播', () => {
+      // 低延迟模式是**会话级**设置，因此会话与区间必须用同一个模式
+      const session = createActiveSession('client-1', true);
+      seedViewerInterval(session, 600_000, 'Full HD 全高清', true);
+      sessions.endSession(session.id, 'manual');
+
+      const info = sessions.toInfo(sessions.getById(session.id)!);
+      expect(info.billingDetail).toContain('互动直播');
+      expect(info.billingDetail).toContain('系数9');
+    });
+
+    it('🔑 标准时长取自区间快照的系数，而不是用当前档位重算', () => {
+      const session = createActiveSession();
+      seedViewerInterval(session, 3_600_000, 'HD 高清', false); // 1 小时 × 系数 2
+      sessions.endSession(session.id, 'manual');
+
+      const info = sessions.toInfo(sessions.getById(session.id)!);
+      // 观众部分 = 60 分钟 × 2 = 120 标准分钟
+      expect(info.standardMinutes).toBeGreaterThanOrEqual(120);
+
+      // 即便把会话档位改成 Full HD（系数 4.5），已结算的区间也不会被重算
+      db.updateSession(session.id, { quality: '1080p_2' });
+      const after = sessions.toInfo(sessions.getById(session.id)!);
+      expect(after.standardMinutes).toBe(info.standardMinutes);
+    });
   });
 });

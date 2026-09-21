@@ -269,11 +269,26 @@ npm run verify        # = typecheck + build + test
   - [x] 单测 19 个 + **真实 DI 容器端到端 20 项**：PENDING 观众不计费、加入后开始计费、
         GRACE 关观众不关主播、恢复不重复开主播区间、checkpoint 不切区间、
         结束一次性收口、账本失败不打断会话
-- [ ] **2-3 计费展示切换到账本**
-  - [ ] `viewer_duration_ms` 改为由 `usage_intervals` 的 viewer 区间求和写入
-  - [ ] `toInfo()` 的系数与单价改读 `quality_config`（不再是硬编码常量）
-  - [ ] 档位改为「优先读会话快照的 `tier`，回退 preset 反查」
-  - [ ] 回归对比：除 **Full HD 极速直播系数由 `4.57` 修正为 `4.5`**（已确认的官方值，见 [open-questions.md](./open-questions.md) §4）导致的约 1.5% 差异外，其余会话的 `estimatedCost` 应与改造前**一致**
+- [x] **2-3 计费展示切换到账本**
+  - [x] 迁移 `004-quality-config`：建 `quality_config` **单行表**（只建表、不播种 ——
+        默认值只在 `quality-config.types.ts` 定义一份，避免两处副本漂移）
+  - [x] `QualityConfigService`：读取 + 内存缓存 + 启动时播种 + 更新时校验；
+        行缺失或 JSON 损坏时**回退默认值并记 warn**（不能静默，否则账单与预期不符却查不出原因）
+  - [x] `toInfo()` 的系数与单价改读 `quality_config`（不再是硬编码常量）
+  - [x] ✅ **Full HD 极速直播系数由 4.57 修正为 4.5**（已确认的官方值）。
+        配置化之后这是**改数据**而不是改代码，正是本阶段设计的收益
+  - [x] 🔑 **标准时长直接取区间快照的系数求和**，而不是「当前档位 × 当前系数」重算 ——
+        后者在会话中途切档位（Phase 3 自定义画质）或调整配置后都会算错。
+        新增 `UsageLedgerService.getStandardMsByRole()`
+  - [x] 🔒 **快照语义**：改动系数/单价**不会改写已结算区间**，只影响新开的区间
+        （单元测试 + E2E 双重锁定）
+  - [x] `viewer_duration_ms` 改为由账本派生并落盘；`checkpointViewerDurations` 改为
+        **只读账本 + 写缓存列**，不再用 pause/resume 落盘（那会切区间）
+  - [x] 历史会话（账本里没有区间）回退到已落盘值，标记沿用旧的峰值人数估算
+  - [x] 超管面板展示的费率也改读 `quality_config`，否则面板会显示过期费率
+  - [x] 单测 25（配置服务）+ 新增账单展示断言；**E2E 15 项**全部通过
+  - [x] 端到端账目校验：1 小时 Full HD 极速直播 = 主播 60 + 观众 270 = **330 标准分钟**，
+        与手算一致；明细显示「系数4.5」且不含 4.57
 - [ ] **2-4 quota 强制与用量看板**
   - [ ] quota 判断读 `provider_usage_monthly`（O(1)）
   - [ ] 达到阈值 → **停止分配新会话**，不中断进行中的会话

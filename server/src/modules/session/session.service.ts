@@ -5,8 +5,10 @@ import { DatabaseService, ServerSession, UsageIntervalClosedReason } from '../da
 import { AgoraService } from '../agora/agora.service';
 import { AgoraProviderService } from '../agora/agora-provider.service';
 import { UsageLedgerService } from '../usage/usage-ledger.service';
+import { QualityConfigService } from '../quality/quality-config.service';
 import { EventBusService } from '../events/events.service';
-import { SessionStatus, ShareSession, SessionInfo, getQualityInfo, getAudioCoefficient, getVideoCoefficient, STANDARD_MINUTE_PRICE } from './session.types';
+import { SessionStatus, ShareSession, SessionInfo, getQualityInfo } from './session.types';
+import { resolveBillingProfile } from '../usage/usage-billing';
 
 /**
  * 会话创建时选不出可用的 Agora Provider。
@@ -38,8 +40,6 @@ export class SessionService implements OnModuleInit {
   private joinCountMap = new Map<string, number>(); // sessionId → count
   /** sessionId → viewerId → 连接引用计数和当前计费区间。 */
   private viewerPresenceMap = new Map<string, Map<string, ViewerPresence>>();
-  /** 已结算到数据库的累计观众毫秒。 */
-  private viewerDurationMsMap = new Map<string, number>();
   /** 当前进程中已经计入 totalViewerJoins 的 viewerId。 */
   private viewerIdsMap = new Map<string, Set<string>>();
 
@@ -49,6 +49,7 @@ export class SessionService implements OnModuleInit {
     private readonly providers: AgoraProviderService,
     private readonly bus: EventBusService,
     private readonly ledger: UsageLedgerService,
+    private readonly qualityConfig: QualityConfigService,
   ) {}
 
   async onModuleInit() {
@@ -347,9 +348,9 @@ export class SessionService implements OnModuleInit {
     const session = this.getByToken(token);
     if (!session || session.status === SessionStatus.ENDED) return undefined;
     const now = Date.now();
-    this.pauseViewerBilling(session.id, now);
-    // 账本：观众停止计费；**主播区间保持开着**，因为主播时长口径含 GRACE 空档
-    this.closeAllViewerIntervals(session.id, now, 'grace');
+    // 观众停止计费（账本区间同时关闭）；**主播区间保持开着**，
+    // 因为主播时长口径含 GRACE 空档（见 docs/open-questions.md 决策 3）
+    this.pauseViewerBilling(session.id, now, 'grace');
     session.status = SessionStatus.GRACE;
     session.graceReason = 'stopped';
     session.graceStartedAt = now;
@@ -416,10 +417,8 @@ export class SessionService implements OnModuleInit {
     if (!viewers || !presence) return;
     presence.connections -= 1;
     if (presence.connections <= 0) {
-      const now = Date.now();
-      this.accrueViewerDuration(sessionId, presence, now);
-      // 账本：观众离开，结算本次观看区间
-      this.closeViewerInterval(sessionId, viewerId, now, 'viewer_left');
+      // 停止计费：在场状态与账本区间一次完成
+      this.stopViewerBilling(sessionId, viewerId, presence, Date.now(), 'viewer_left');
       viewers.delete(viewerId);
     }
     if (viewers.size === 0) this.viewerPresenceMap.delete(sessionId);
@@ -469,27 +468,34 @@ export class SessionService implements OnModuleInit {
     });
   }
 
-  private accrueViewerDuration(
+  /**
+   * 停止某观众的计费：更新在场状态 + 关闭账本区间。
+   *
+   * 时长**不再在这里累加** —— `usage_intervals` 是唯一的事实来源，
+   * 数值由账本派生（见 `getViewerDurationMs`）。这里只负责状态机
+   * （谁当前在计费）与账本区间的开合，避免两套口径各算一份。
+   */
+  private stopViewerBilling(
     sessionId: string,
+    viewerId: string,
     presence: ViewerPresence,
     now: number,
+    reason: UsageIntervalClosedReason,
   ): void {
     if (presence.billingStartedAt === null) return;
-    const session = this.getById(sessionId);
-    const current = this.viewerDurationMsMap.get(sessionId)
-      ?? session?.viewerDurationMs
-      ?? 0;
-    const next = current + Math.max(0, now - presence.billingStartedAt);
-    this.viewerDurationMsMap.set(sessionId, next);
     presence.billingStartedAt = null;
-    this.db.updateSession(sessionId, { viewerDurationMs: next });
+    this.closeViewerInterval(sessionId, viewerId, now, reason);
   }
 
-  private pauseViewerBilling(sessionId: string, now = Date.now()): void {
+  private pauseViewerBilling(
+    sessionId: string,
+    now = Date.now(),
+    reason: UsageIntervalClosedReason = 'grace',
+  ): void {
     const viewers = this.viewerPresenceMap.get(sessionId);
     if (!viewers) return;
-    for (const presence of viewers.values()) {
-      this.accrueViewerDuration(sessionId, presence, now);
+    for (const [viewerId, presence] of viewers) {
+      this.stopViewerBilling(sessionId, viewerId, presence, now, reason);
     }
   }
 
@@ -504,9 +510,8 @@ export class SessionService implements OnModuleInit {
   // ===== 用量账本（旁路写入）=====
   //
   // ⚠️ 只在**真实的计费状态转换**处写入：观众加入 / 离开、进入 / 退出 GRACE、会话结束。
-  // 刻意**不**挂在 pauseViewerBilling / resumeViewerBilling 内部 ——
-  // checkpointViewerDurations 每 10 秒就会 pause+resume 一次做落盘，
-  // 挂在那里会每 10 秒切出一个新区间，把账本变成噪声。
+  // 账本区间一旦被「每次落盘」这种高频路径触碰，就会被切成大量碎片，
+  // 因此落盘（checkpointViewerDurations）只读账本、不改状态机。
 
   /**
    * 账本是**旁路**：写入失败不应打断正在进行的共享，
@@ -559,19 +564,6 @@ export class SessionService implements OnModuleInit {
     }));
   }
 
-  /** 关闭当前在线所有观众的计费区间（进入 GRACE / 会话结束）。 */
-  private closeAllViewerIntervals(
-    sessionId: string,
-    at: number,
-    reason: UsageIntervalClosedReason,
-  ): void {
-    const viewers = this.viewerPresenceMap.get(sessionId);
-    if (!viewers) return;
-    for (const viewerId of viewers.keys()) {
-      this.closeViewerInterval(sessionId, viewerId, at, reason);
-    }
-  }
-
   /**
    * 为当前在线所有观众开计费区间（回到 ACTIVE）。
    *
@@ -608,31 +600,35 @@ export class SessionService implements OnModuleInit {
     }));
   }
 
+  /**
+   * 观众累计观看毫秒数。
+   *
+   * **以账本为准**：已关闭区间之和 + 进行中区间的实时部分。
+   * 账本里完全没有该会话的区间时回退到已落盘的 `session.viewerDurationMs` ——
+   * 那是账本启用之前创建的历史会话，只有旧值可用。
+   *
+   * 返回 `null` 表示「历史会话且没有落盘值」，调用方按旧记录估算。
+   */
   private getViewerDurationMs(session: ShareSession, now = Date.now()): number | null {
-    const stored = this.viewerDurationMsMap.get(session.id) ?? session.viewerDurationMs;
-    if (stored === null) return null;
-    let total = stored;
-    const viewers = this.viewerPresenceMap.get(session.id);
-    if (viewers) {
-      for (const presence of viewers.values()) {
-        if (presence.billingStartedAt !== null) {
-          total += Math.max(0, now - presence.billingStartedAt);
-        }
-      }
+    if (!this.ledger.hasSessionIntervals(session.id)) {
+      return session.viewerDurationMs;
     }
-    return total;
+    return this.ledger.getViewerDurationMs(session.id, now);
   }
 
-  /** 定期落盘活跃观众时长，降低进程异常退出造成的计费误差。 */
+  /**
+   * 定期把**账本派生**的观众时长落盘，降低进程异常退出造成的计费误差。
+   *
+   * 只读账本 + 写缓存列，**不触碰在场状态机**，因此不会切出多余区间。
+   */
   @Interval(10_000)
   checkpointViewerDurations(): void {
-    const now = Date.now();
     for (const sessionId of this.viewerPresenceMap.keys()) {
-      this.pauseViewerBilling(sessionId, now);
       const session = this.getById(sessionId);
-      if (session?.status === SessionStatus.ACTIVE) {
-        this.resumeViewerBilling(sessionId, now);
-      }
+      if (!session || session.status === SessionStatus.ENDED) continue;
+      this.db.updateSession(sessionId, {
+        viewerDurationMs: this.ledger.getViewerDurationMs(sessionId),
+      });
     }
   }
 
@@ -658,9 +654,9 @@ export class SessionService implements OnModuleInit {
     const ageMs = Date.now() - session.createdAt;
     const endedAt = Date.now();
     const durationMs = session.startedAt ? endedAt - session.startedAt : null;
-    this.pauseViewerBilling(sessionId, endedAt);
-    // 账本：一次性关闭该会话的全部区间（含主播区间），
-    // 因此即使某个观众区间因异常没被单独关掉，这里也会兜底收口。
+    this.pauseViewerBilling(sessionId, endedAt, 'session_end');
+    // 兜底：一次性关闭该会话的全部区间（含主播区间），
+    // 因此即使某个观众区间因异常没被单独关掉，这里也会收口。
     this.safeLedger(() => this.ledger.closeSessionIntervals(sessionId, 'session_end', endedAt));
     const viewerDurationMs = this.getViewerDurationMs(session, endedAt);
 
@@ -677,11 +673,10 @@ export class SessionService implements OnModuleInit {
       viewerDurationMs,
     });
 
-    // 清理内存 Map
+    // 清理内存 Map（观众时长的账本区间已在上方关闭，无需再单独清理累加值）
     this.lastViewerMap.delete(sessionId);
     this.joinCountMap.delete(sessionId);
     this.viewerPresenceMap.delete(sessionId);
-    this.viewerDurationMsMap.delete(sessionId);
     this.viewerIdsMap.delete(sessionId);
 
     this.bus.emitSessionEnded({
@@ -713,29 +708,53 @@ export class SessionService implements OnModuleInit {
       durationMs = session.endedAt - session.startedAt;
     }
 
-    const qi = getQualityInfo(session.quality);
+    // 档位仍由 preset key 反查（Phase 3 会把编码参数快照写进会话，
+    // 届时改为「优先读快照，回退 preset 反查」，自定义分辨率才能算对档位）
+    const tier = getQualityInfo(session.quality).tier;
     const durationSec = durationMs ? durationMs / 1000 : 0;
 
-    // 主播：不订阅自己的视频流，始终按音频计费（互动直播音频系数=1）
-    const broadcasterAudioCoeff = getAudioCoefficient(session.lowLatency, true);
-    const broadcasterStandardSec = durationSec * broadcasterAudioCoeff;
+    // 折算系数来自可配置的 `quality_config`：声网调价、或系数写错时改数据即可，
+    // 不需要发版。主播与观众的口径差异由 resolveBillingProfile 统一表达。
+    const config = this.qualityConfig.get();
+    const broadcasterAudioCoeff = resolveBillingProfile({
+      role: 'publisher', tier, lowLatency: session.lowLatency, config,
+    }).coefficient;
+    const viewerVideoCoeff = resolveBillingProfile({
+      role: 'viewer', tier, lowLatency: session.lowLatency, config,
+    }).coefficient;
 
-    // 观众：订阅视频流，按 lowLatency 模式选择互动直播或极速直播视频系数
-    const viewerVideoCoeff = getVideoCoefficient(qi.tier, session.lowLatency);
     const viewerDurationMs = this.getViewerDurationMs(session);
     const legacyViewerEstimate = viewerDurationMs === null;
-    const viewerDurationSec = legacyViewerEstimate
-      ? session.peakViewers * durationSec
-      : viewerDurationMs / 1000;
-    const viewerStandardSec = viewerDurationSec * viewerVideoCoeff;
+
+    let broadcasterStandardSec: number;
+    let viewerStandardSec: number;
+    let viewerDurationSec: number;
+
+    if (this.ledger.hasSessionIntervals(session.id)) {
+      // 🔑 账本为准：直接用区间**结算时快照**的系数求和，
+      // 而不是用「当前档位 × 当前系数」重算 —— 后者在会话中途切换档位
+      // （自由画布的自定义画质）或调整配置之后都会算错。
+      const standardMs = this.ledger.getStandardMsByRole(session.id);
+      broadcasterStandardSec = standardMs.publisher / 1000;
+      viewerStandardSec = standardMs.viewer / 1000;
+      viewerDurationSec = (viewerDurationMs ?? 0) / 1000;
+    } else {
+      // 账本启用之前的历史会话：沿用旧的估算口径（按当前档位与峰值人数推算）
+      broadcasterStandardSec = durationSec * broadcasterAudioCoeff;
+      viewerDurationSec = legacyViewerEstimate
+        ? session.peakViewers * durationSec
+        : viewerDurationMs / 1000;
+      viewerStandardSec = viewerDurationSec * viewerVideoCoeff;
+    }
 
     // 标准时长（分钟），向上取整
     const standardMinutes = durationMs
       ? Math.ceil((broadcasterStandardSec + viewerStandardSec) / 60)
       : 0;
 
-    // 预估费用（后付费单价 0.007 元/标准分钟）
-    const estimatedCost = Math.round(standardMinutes * STANDARD_MINUTE_PRICE * 100) / 100;
+    // 预估费用（单价同样可配，默认 0.007 元/标准分钟）
+    const estimatedCost =
+      Math.round(standardMinutes * config.standardMinutePrice * 100) / 100;
 
     const durationMin = durationSec / 60;
     const viewerDurationMin = viewerDurationSec / 60;
@@ -845,9 +864,8 @@ export class SessionService implements OnModuleInit {
       if (session.status === SessionStatus.ACTIVE) {
         const elapsed = now - session.lastHeartbeat;
         if (elapsed > cfg.heartbeatIntervalSec * 1000 * 3) {
-          this.pauseViewerBilling(session.id, now);
-          // 账本：心跳丢失进入 GRACE，观众停止计费（主播区间继续开着）
-          this.closeAllViewerIntervals(session.id, now, 'grace');
+          // 心跳丢失进入 GRACE：观众停止计费（主播区间继续开着）
+          this.pauseViewerBilling(session.id, now, 'grace');
           this.db.updateSession(session.id, {
             status: SessionStatus.GRACE,
             graceReason: 'heartbeat',

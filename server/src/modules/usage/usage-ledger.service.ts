@@ -8,6 +8,7 @@ import {
 } from '../database/database.service';
 import { resolveBillingProfile } from './usage-billing';
 import { DEFAULT_USAGE_TIMEZONE, currentPeriodKey } from './usage-period';
+import { QualityConfigService } from '../quality/quality-config.service';
 
 export interface OpenIntervalInput {
   sessionId: string;
@@ -64,10 +65,18 @@ export interface CloseIntervalInput {
 export class UsageLedgerService implements OnModuleInit {
   private readonly logger = new Logger(UsageLedgerService.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly qualityConfig: QualityConfigService,
+  ) {}
 
   onModuleInit(): void {
     this.recoverDanglingIntervals();
+  }
+
+  /** 计费时区：跟随可配置项，默认 Asia/Shanghai。 */
+  private resolveTimeZone(explicit?: string): string {
+    return explicit ?? this.qualityConfig.getUsageTimezone() ?? DEFAULT_USAGE_TIMEZONE;
   }
 
   // ===== 崩溃恢复 =====
@@ -124,6 +133,7 @@ export class UsageLedgerService implements OnModuleInit {
       role: input.role,
       tier: input.tier,
       lowLatency: input.lowLatency,
+      config: this.qualityConfig.get(),
     });
 
     const id = this.db.openUsageInterval({
@@ -135,7 +145,7 @@ export class UsageLedgerService implements OnModuleInit {
       tier: input.tier,
       billingModel: profile.billingModel,
       coefficient: profile.coefficient,
-      periodKey: currentPeriodKey(input.timeZone ?? DEFAULT_USAGE_TIMEZONE, new Date(startedAt)),
+      periodKey: currentPeriodKey(this.resolveTimeZone(input.timeZone), new Date(startedAt)),
       startedAt,
       lowLatency: input.lowLatency,
       width: input.video?.width ?? null,
@@ -230,6 +240,38 @@ export class UsageLedgerService implements OnModuleInit {
   /** 某会话的全部区间，按开始时间升序。 */
   listSessionIntervals(sessionId: string): UsageIntervalRecord[] {
     return this.db.listUsageIntervalsBySession(sessionId);
+  }
+
+  /**
+   * 该会话在账本里是否有区间。
+   *
+   * 用于区分「账本启用后创建的会话」与「迁移前的历史会话」——
+   * 后者没有区间，其观看时长只能沿用已落盘的 `sessions.viewer_duration_ms`。
+   */
+  hasSessionIntervals(sessionId: string): boolean {
+    return this.db.countUsageIntervalsBySession(sessionId) > 0;
+  }
+
+  /**
+   * 某会话按角色统计的**标准时长毫秒数**（计费展示用）。
+   *
+   * = 已关闭区间的 `standard_ms` 之和 + 进行中区间的「(now - started_at) × coefficient」。
+   *
+   * 🔑 直接用区间**结算时快照**的系数，而不是「当前档位 × 当前系数」重算：
+   * 后者在会话中途切换档位（自由画质）或调整配置之后都会算错。
+   * 这也是账本作为「计费事实来源」的意义所在。
+   */
+  getStandardMsByRole(sessionId: string, now = Date.now()): { publisher: number; viewer: number } {
+    const totals = { publisher: 0, viewer: 0 };
+    for (const interval of this.db.listUsageIntervalsBySession(sessionId)) {
+      const contribution =
+        interval.endedAt !== null
+          ? interval.standardMs ?? 0
+          : Math.max(0, now - interval.startedAt) * interval.coefficient;
+      if (interval.role === 'publisher') totals.publisher += contribution;
+      else totals.viewer += contribution;
+    }
+    return totals;
   }
 
   // ===== 月度汇总 =====

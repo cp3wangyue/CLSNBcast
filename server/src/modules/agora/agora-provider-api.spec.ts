@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseService } from '../database/database.service';
 import { SecretCryptoService } from '../crypto/secret-crypto.service';
 import { AgoraProviderService } from './agora-provider.service';
+import { QualityConfigService } from '../quality/quality-config.service';
 import { SuperAdminController } from '../super-admin/super-admin.controller';
 import { ServerAdminController } from '../server-admin/server-admin.controller';
 
@@ -20,6 +21,7 @@ describe('Agora Provider 管理端接口', () => {
   let dir: string;
   let db: DatabaseService;
   let providers: AgoraProviderService;
+  let qualityConfig: QualityConfigService;
   let superAdmin: SuperAdminController;
   let spaceAdmin: ServerAdminController;
 
@@ -35,7 +37,9 @@ describe('Agora Provider 管理端接口', () => {
 
     db = new DatabaseService();
     providers = new AgoraProviderService(db, new SecretCryptoService());
-    superAdmin = new SuperAdminController(db, providers);
+    qualityConfig = new QualityConfigService(db);
+    qualityConfig.onModuleInit();
+    superAdmin = new SuperAdminController(db, providers, qualityConfig);
     spaceAdmin = new ServerAdminController(db, providers);
 
     db.createServer(SPACE_A, 'A 服务器', 'owner-a', '服主A');

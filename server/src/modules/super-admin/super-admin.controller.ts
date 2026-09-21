@@ -15,6 +15,7 @@ import { DatabaseService } from '../database/database.service';
 import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
 import { AgoraProviderService } from '../agora/agora-provider.service';
+import { QualityConfigService } from '../quality/quality-config.service';
 import {
   CreateAgoraProviderDto,
   UpdateAgoraProviderDto,
@@ -24,12 +25,7 @@ import {
   UpdateGlobalConfigDto,
   UpdateServerDto,
 } from './super-admin.dto';
-import {
-  getVideoCoefficient,
-  QUALITY_PRESETS,
-  STANDARD_MINUTE_PRICE,
-  type QualityBitrateConfig,
-} from '../session/session.types';
+import { QUALITY_PRESETS, type QualityBitrateConfig } from '../session/session.types';
 
 /** 用户 ID 脱敏：保留首 3 位和末 4 位 */
 function maskUserId(uid: string): string {
@@ -46,6 +42,7 @@ export class SuperAdminController {
   constructor(
     private readonly db: DatabaseService,
     private readonly providers: AgoraProviderService,
+    private readonly qualityConfig: QualityConfigService,
   ) {
     const pwd = process.env.SUPER_ADMIN_PASSWORD!;
     this.superPasswordHash = bcrypt.hashSync(pwd, 10);
@@ -71,6 +68,12 @@ export class SuperAdminController {
   @Get('config')
   getConfig() {
     const cfg = this.db.getGlobalConfig();
+    // 费率展示必须读**可配置的** quality_config，否则面板会显示过期费率：
+    // 系数与单价自 Phase 2-3 起不再来自硬编码表，改配置后这里要跟着变。
+    const billing = this.qualityConfig.get();
+    const price = billing.standardMinutePrice;
+    const hourlyRate = (coefficient: number) => coefficient * price * 60;
+
     return {
       kookBotToken: cfg.kookBotToken ? '******' : '',
       kookVerifyToken: cfg.kookVerifyToken ? '******' : '',
@@ -78,18 +81,21 @@ export class SuperAdminController {
       publicDomain: cfg.publicDomain,
       triggerWordLabels: cfg.triggerWordLabels,
       qualityBitrates: cfg.qualityBitrates,
-      qualityProfiles: QUALITY_PRESETS.map((quality) => ({
-        key: quality.key,
-        label: quality.label,
-        width: quality.width,
-        height: quality.height,
-        frameRate: quality.frameRate,
-        interactiveViewerHourlyRate:
-          getVideoCoefficient(quality.tier, true) * STANDARD_MINUTE_PRICE * 60,
-        liveViewerHourlyRate:
-          getVideoCoefficient(quality.tier, false) * STANDARD_MINUTE_PRICE * 60,
-      })),
-      broadcasterHourlyRate: STANDARD_MINUTE_PRICE * 60,
+      qualityProfiles: QUALITY_PRESETS.map((quality) => {
+        const rule = this.qualityConfig.tierRuleFor(quality.width, quality.height);
+        return {
+          key: quality.key,
+          label: quality.label,
+          width: quality.width,
+          height: quality.height,
+          frameRate: quality.frameRate,
+          tier: rule.tier,
+          interactiveViewerHourlyRate: hourlyRate(rule.interactive),
+          liveViewerHourlyRate: hourlyRate(rule.ultraLowLatency),
+        };
+      }),
+      broadcasterHourlyRate: hourlyRate(billing.audioCoefficients.broadcaster),
+      standardMinutePrice: price,
     };
   }
 
