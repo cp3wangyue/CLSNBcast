@@ -354,8 +354,8 @@ export class DatabaseService implements OnModuleDestroy {
   /**
    * 清空服务器的明文证书。
    *
-   * ⚠️ 只能在 Token 签发路径已经切到 Provider 之后调用 —— 在那之前旧路径
-   * （`generateToken` 读 `servers.agora_app_certificate`）仍然依赖它。
+   * Token 签发自 Phase 1-3 起改为从 Provider 读取，`servers.agora_app_certificate`
+   * 已不再是任何代码的输入，因此现在调用它总是安全的。
    */
   clearServerCertificate(serverId: string): void {
     this.db
