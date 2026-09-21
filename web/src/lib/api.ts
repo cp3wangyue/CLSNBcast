@@ -3,7 +3,7 @@ import type {
   AgoraTokenResponse,
 } from '../types';
 
-const SUPER_TOKEN_KEY = 'xgoat_super_token';
+const SUPER_TOKEN_KEY = 'clsnbcast_super_token';
 export type Platform = 'kook' | 'qq' | 'discord';
 
 export function getSuperAdminToken(): string | null {
@@ -15,19 +15,19 @@ export function clearSuperAdminToken(): void {
 }
 
 export function getServerAdminToken(serverId: string): string | null {
-  return localStorage.getItem(`xgoat_server_${serverId}`);
+  return localStorage.getItem(`clsnbcast_server_${serverId}`);
 }
 
 export function setServerAdminToken(serverId: string, token: string): void {
-  localStorage.setItem(`xgoat_server_${serverId}`, token);
+  localStorage.setItem(`clsnbcast_server_${serverId}`, token);
 }
 
 export function clearServerAdminToken(serverId: string): void {
-  localStorage.removeItem(`xgoat_server_${serverId}`);
+  localStorage.removeItem(`clsnbcast_server_${serverId}`);
 }
 
 function getSpaceAdminTokenKey(platform: Platform, externalId: string): string {
-  return `xgoat_space_${platform}_${externalId}`;
+  return `clsnbcast_space_${platform}_${externalId}`;
 }
 
 export function getSpaceAdminToken(platform: Platform, externalId: string): string | null {

@@ -1,9 +1,9 @@
 services:
-  xgoatcast:
+  clsnbcast:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: xgoatcast
+    container_name: clsnbcast
     restart: unless-stopped
     init: true
     ports:
@@ -13,7 +13,7 @@ services:
     environment:
       - NODE_ENV=production
     volumes:
-      - xgoatcast-data:/app/data
+      - clsnbcast-data:/app/data
     logging:
       driver: json-file
       options:
@@ -27,4 +27,4 @@ services:
       start_period: 10s
 
 volumes:
-  xgoatcast-data:
+  clsnbcast-data:

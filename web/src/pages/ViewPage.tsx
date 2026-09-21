@@ -180,10 +180,10 @@ export default function ViewPage() {
         isFullscreen && 'hidden'
       )}>
         <div className="flex items-center gap-3">
-          <span className="text-lg">🐑</span>
+          <span className="text-lg">🖥</span>
           <div>
             <p className="font-semibold text-sm leading-tight">
-              {info?.sharerUsername || 'Xgoat.Cast'}
+              {info?.sharerUsername || 'CLSNBcast'}
             </p>
             <p className="text-xs text-dim">正在直播屏幕</p>
           </div>

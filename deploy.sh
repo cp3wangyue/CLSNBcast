@@ -2,12 +2,12 @@
 set -Eeuo pipefail
 
 SSH_HOST="${SSH_HOST:-rainyun}"
-REMOTE_DIR="${REMOTE_DIR:-/root/xgoatcast}"
-SERVICE="${SERVICE:-xgoatcast}"
+REMOTE_DIR="${REMOTE_DIR:-/root/clsnbcast}"
+SERVICE="${SERVICE:-clsnbcast}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ARCHIVE_NAME="xgoatcast-deploy-$$.tar.gz"
+ARCHIVE_NAME="clsnbcast-deploy-$$.tar.gz"
 LOCAL_ARCHIVE="${TMPDIR:-/tmp}/${ARCHIVE_NAME}"
 
 cleanup() {

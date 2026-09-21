@@ -9,8 +9,8 @@ import type { SessionInfo } from '../types';
 import { NoticeBanners } from '../components/notices/NoticeCenter';
 
 // ===== Cookie 工具 =====
-const CID_KEY = 'xgoatcast_cid';
-const ACTIVE_KEY = 'xgoatcast_active';
+const CID_KEY = 'clsnbcast_cid';
+const ACTIVE_KEY = 'clsnbcast_active';
 
 function getCookie(name: string): string | null {
   const m = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
@@ -212,10 +212,10 @@ export default function SharePage() {
       <header className="flex items-center justify-between mb-8 max-w-3xl mx-auto">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-dark to-brand flex items-center justify-center text-xl">
-            🐑
+            🖥
           </div>
           <div>
-            <h1 className="font-bold text-lg leading-tight">Xgoat.Cast</h1>
+            <h1 className="font-bold text-lg leading-tight">CLSNBcast</h1>
             <p className="text-xs text-muted">屏幕共享</p>
           </div>
         </div>

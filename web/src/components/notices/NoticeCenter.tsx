@@ -37,7 +37,7 @@ const NoticeContext = createContext<NoticeContextValue>({
 });
 
 function storageKey(notice: PublicNotice): string {
-  return `xgoat_notice_${notice.id}`;
+  return `clsnbcast_notice_${notice.id}`;
 }
 
 function wasDismissed(notice: PublicNotice): boolean {

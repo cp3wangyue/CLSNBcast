@@ -35,10 +35,10 @@ export function useSessionSSE(token: string, role: 'publisher' | 'viewer') {
   // 生成稳定的 viewerId（sessionStorage 保证同标签页刷新不变，私有标签页独立）
   const viewerIdRef = useRef('');
   if (!viewerIdRef.current && role === 'viewer') {
-    let vid = sessionStorage.getItem('xgoatcast_vid');
+    let vid = sessionStorage.getItem('clsnbcast_vid');
     if (!vid) {
       vid = crypto.randomUUID();
-      sessionStorage.setItem('xgoatcast_vid', vid);
+      sessionStorage.setItem('clsnbcast_vid', vid);
     }
     viewerIdRef.current = vid;
   }

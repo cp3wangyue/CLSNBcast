@@ -104,10 +104,10 @@ export default function ServerAdminPage() {
       <aside className="fixed left-0 top-0 bottom-0 w-60 glass-strong flex flex-col py-6 px-4 z-10">
         <div className="flex items-center gap-3 px-2 mb-8">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-dark to-brand flex items-center justify-center text-xl">
-            🐑
+            🖥
           </div>
           <div>
-            <p className="font-bold text-sm leading-tight">Xgoat.Cast</p>
+            <p className="font-bold text-sm leading-tight">CLSNBcast</p>
             <p className="text-xs text-dim truncate max-w-[140px]">{serverInfo.guildName || serverId}</p>
             {serverInfo.openId && <p className="text-xs text-dim">公开ID: {serverInfo.openId}</p>}
           </div>
@@ -174,7 +174,7 @@ function BindTokenRequired({ guildName }: { guildName: string }) {
           该服务器的管理面板尚未绑定。请在 KOOK 服务器内发送以下命令获取绑定链接：
         </p>
         <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 mb-4">
-          <code className="text-brand-light text-sm font-mono">/xchelp</code>
+          <code className="text-brand-light text-sm font-mono">/cbhelp</code>
         </div>
         <p className="text-xs text-dim">
           仅服务器主可执行此命令，绑定链接 10 分钟内有效
@@ -223,7 +223,7 @@ function BindPage({ serverId, guildName, bindToken, onBind }: { serverId: string
       <form onSubmit={handleSubmit} className="glass rounded-2xl p-8 w-full max-w-sm">
         <div className="text-center mb-6">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-dark to-brand flex items-center justify-center text-2xl mx-auto mb-3">
-            🐑
+            🖥
           </div>
           <h1 className="text-xl font-bold">绑定管理面板</h1>
           <p className="text-xs text-muted mt-1">{guildName || serverId}</p>
@@ -295,7 +295,7 @@ function ServerLoginForm({ serverId, onSuccess }: { serverId: string; onSuccess:
       <form onSubmit={handleSubmit} className="glass rounded-2xl p-8 w-full max-w-sm">
         <div className="text-center mb-6">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-dark to-brand flex items-center justify-center text-2xl mx-auto mb-3">
-            🐑
+            🖥
           </div>
           <h1 className="text-xl font-bold">服务器管理面板</h1>
           <p className="text-xs text-muted mt-1">ID: {serverId}</p>

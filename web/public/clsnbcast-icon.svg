@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="CLSNBcast">
+  <defs>
+    <linearGradient id="clsnbcast-brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF6B35" />
+      <stop offset="1" stop-color="#FFA559" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded brand plate -->
+  <rect width="64" height="64" rx="14" fill="url(#clsnbcast-brand)" />
+
+  <!-- Screen -->
+  <rect x="11" y="15" width="42" height="28" rx="4.5" fill="none" stroke="#fff" stroke-width="4.5" />
+
+  <!-- Stand -->
+  <path d="M32 43v6" stroke="#fff" stroke-width="4.5" stroke-linecap="round" />
+  <path d="M25 49h14" stroke="#fff" stroke-width="4.5" stroke-linecap="round" />
+
+  <!-- Broadcast waves emitted from the screen centre -->
+  <circle cx="32" cy="29" r="3.4" fill="#fff" />
+  <path d="M25.6 22.6a9 9 0 0 0 0 12.8" fill="none" stroke="#fff" stroke-width="3.2"
+        stroke-linecap="round" opacity="0.85" />
+  <path d="M38.4 22.6a9 9 0 0 1 0 12.8" fill="none" stroke="#fff" stroke-width="3.2"
+        stroke-linecap="round" opacity="0.85" />
+</svg>

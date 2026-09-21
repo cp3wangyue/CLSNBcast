@@ -19,7 +19,7 @@ export function buildShareLinkCard(opts: {
           type: 'section',
           text: {
             type: 'kmarkdown',
-            content: '**Xgoat.Cast 小羊屏幕共享已创建** 🐑\n' + safeName + '，点击下方按钮开始共享你的屏幕。',
+            content: '**CLSNBcast 屏幕共享已创建** 🖥\n' + safeName + '，点击下方按钮开始共享你的屏幕。',
           },
         },
         {
@@ -63,7 +63,7 @@ export function buildViewingCard(opts: {
           type: 'section',
           text: {
             type: 'kmarkdown',
-            content: `**屏幕共享已开始** 🐑\n${safeName} 正在共享屏幕`,
+            content: `**屏幕共享已开始** 🖥\n${safeName} 正在共享屏幕`,
           },
         },
         {
@@ -111,7 +111,7 @@ export function buildEndedShareCard(opts: {
           type: 'section',
           text: {
             type: 'kmarkdown',
-            content: '**屏幕共享已结束** 🐑\n' + safeName + ' 的屏幕共享已结束',
+            content: '**屏幕共享已结束** 🖥\n' + safeName + ' 的屏幕共享已结束',
           },
         },
         {
@@ -152,7 +152,7 @@ export function buildHelpCard(opts?: { triggerWords?: string; showShareButton?: 
       type: 'section',
       text: {
         type: 'kmarkdown',
-        content: '**🐑 Xgoat.Cast · 使用说明**',
+        content: '**🖥 CLSNBcast · 使用说明**',
       },
     },
     { type: 'divider' },
@@ -167,7 +167,7 @@ export function buildHelpCard(opts?: { triggerWords?: string; showShareButton?: 
       type: 'section',
       text: {
         type: 'kmarkdown',
-        content: '**可用指令**\n• `/xchelp` — 查看使用说明、绑定和管理面板',
+        content: '**可用指令**\n• `/cbhelp` — 查看使用说明、绑定和管理面板',
       },
     },
   ];
@@ -217,7 +217,7 @@ export function buildBindCard(opts: {
           type: 'section',
           text: {
             type: 'kmarkdown',
-            content: `**🐑 Xgoat.Cast 屏幕共享机器人已加入服务器**\n\n服务器：**${opts.guildName}**${idLabel ? '\n' + idLabel : ''}`,
+            content: `**🖥 CLSNBcast 屏幕共享机器人已加入服务器**\n\n服务器：**${opts.guildName}**${idLabel ? '\n' + idLabel : ''}`,
           },
         },
         {
@@ -245,7 +245,7 @@ export function buildBindCard(opts: {
   ];
 }
 
-/** 已绑定提示卡片（服务器已绑定时回复给发起 /xchelp 的频道主） */
+/** 已绑定提示卡片（服务器已绑定时回复给发起 /cbhelp 的频道主） */
 export function buildAlreadyBoundCard(opts: {
   guildName: string;
   manageUrl: string;
@@ -262,7 +262,7 @@ export function buildAlreadyBoundCard(opts: {
           type: 'section',
           text: {
             type: 'kmarkdown',
-            content: `**🐑 Xgoat.Cast 管理面板已绑定**\n\n服务器：**${opts.guildName}**\n\n该服务器的管理面板已经绑定完成。`,
+            content: `**🖥 CLSNBcast 管理面板已绑定**\n\n服务器：**${opts.guildName}**\n\n该服务器的管理面板已经绑定完成。`,
           },
         },
         {
@@ -308,14 +308,14 @@ export function buildBindRequestCard(opts: {
           type: 'section',
           text: {
             type: 'kmarkdown',
-            content: `**🐑 Xgoat.Cast 绑定管理面板**\n\n服务器：**${opts.guildName}**${idLabel ? '\n' + idLabel : ''}`,
+            content: `**🖥 CLSNBcast 绑定管理面板**\n\n服务器：**${opts.guildName}**${idLabel ? '\n' + idLabel : ''}`,
           },
         },
         {
           type: 'section',
           text: {
             type: 'kmarkdown',
-            content: '作为频道主，您需要绑定管理面板来配置屏幕共享设置（画质选项、声网凭证等）。\n\n⚠️ **绑定链接 10 分钟内有效**，过期后需重新发送 `/xchelp` 命令获取。',
+            content: '作为频道主，您需要绑定管理面板来配置屏幕共享设置（画质选项、声网凭证等）。\n\n⚠️ **绑定链接 10 分钟内有效**，过期后需重新发送 `/cbhelp` 命令获取。',
           },
         },
         { type: 'divider' },

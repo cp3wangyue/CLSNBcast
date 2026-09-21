@@ -1,9 +1,7 @@
 import { useState } from 'react';
-import { Github, Monitor, Users, Zap, Settings, Mail, ExternalLink, Gauge, Volume2 } from 'lucide-react';
+import { Github, Monitor, Users, Zap, Settings, ExternalLink, Gauge, Volume2 } from 'lucide-react';
 
-const GITHUB_URL = 'https://github.com/rnm330/XgoatCast';
-const DEVELOPER = 'xgoat小羊';
-const EMAIL = 'xgoateam@gmail.com';
+const GITHUB_URL = 'https://github.com/cp3wangyue/CLSNBcast';
 
 const FEATURES = [
   {
@@ -47,8 +45,8 @@ export default function HomePage() {
       <header className="sticky top-0 z-20 glass-strong px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div>
-            <p className="font-bold text-base leading-tight">Xgoat.Cast</p>
-            <p className="text-xs text-dim">小羊屏幕共享</p>
+            <p className="font-bold text-base leading-tight">CLSNBcast</p>
+            <p className="text-xs text-dim">屏幕共享</p>
           </div>
         </div>
         <nav className="flex items-center gap-2 sm:gap-4">
@@ -71,7 +69,7 @@ export default function HomePage() {
           基于 Agora 声网 + NestJS
         </div>
         <h1 className="text-4xl sm:text-5xl font-bold gradient-text mb-4">
-          Xgoat.Cast · 小羊屏幕共享
+          CLSNBcast · 屏幕共享
         </h1>
         <p className="text-muted text-base sm:text-lg max-w-2xl mb-8 leading-relaxed">
           聊天软件快捷屏幕共享工具。频道内发条消息即可发起，
@@ -126,19 +124,12 @@ export default function HomePage() {
       <footer className="border-t border-white/5 px-6 py-8">
         <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
           <div>
-            <p className="text-sm font-medium">Xgoat.Cast</p>
+            <p className="text-sm font-medium">CLSNBcast</p>
             <p className="text-xs text-dim">
-              © {new Date().getFullYear()} Xgoat.Cast · 由 {DEVELOPER} 开发
+              © {new Date().getFullYear()} CLSNBcast
             </p>
           </div>
           <div className="flex items-center gap-4">
-            <a
-              href={`mailto:${EMAIL}`}
-              className="flex items-center gap-1.5 text-xs text-muted hover:text-white transition-colors"
-            >
-              <Mail className="w-3.5 h-3.5" />
-              {EMAIL}
-            </a>
             <a
               href={GITHUB_URL}
               target="_blank"
@@ -182,7 +173,7 @@ function DeployGuideModal({ onClose }: { onClose: () => void }) {
             <div className="w-6 h-6 rounded-full bg-brand/20 flex items-center justify-center text-xs text-brand-light font-bold flex-shrink-0 mt-0.5">2</div>
             <div>
               <p className="text-sm font-medium text-white">绑定管理面板</p>
-              <p className="text-xs text-muted mt-1">机器人加入后自动向频道主发送绑定卡片。若未收到，频道主发送 <code className="bg-white/10 px-1 rounded">/xchelp</code> 重新调起。</p>
+              <p className="text-xs text-muted mt-1">机器人加入后自动向频道主发送绑定卡片。若未收到，频道主发送 <code className="bg-white/10 px-1 rounded">/cbhelp</code> 重新调起。</p>
             </div>
           </div>
 

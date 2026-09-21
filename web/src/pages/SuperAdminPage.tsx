@@ -73,10 +73,10 @@ export default function SuperAdminPage() {
       <aside className="fixed left-0 top-0 bottom-0 w-60 glass-strong flex flex-col py-6 px-4 z-10">
         <div className="flex items-center gap-3 px-2 mb-8">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-dark to-brand flex items-center justify-center text-xl">
-            🐑
+            🖥
           </div>
           <div>
-            <p className="font-bold text-sm leading-tight">Xgoat.Cast</p>
+            <p className="font-bold text-sm leading-tight">CLSNBcast</p>
             <p className="text-xs text-dim">超级管理后台</p>
           </div>
         </div>
@@ -150,7 +150,7 @@ function SuperLoginForm({ onSuccess }: { onSuccess: () => void }) {
     try {
       const res = await api.superLogin(password);
       if (res.ok && res.token) {
-        localStorage.setItem('xgoat_super_token', res.token);
+        localStorage.setItem('clsnbcast_super_token', res.token);
         onSuccess();
       } else {
         setError(res.message || '登录失败');
@@ -167,10 +167,10 @@ function SuperLoginForm({ onSuccess }: { onSuccess: () => void }) {
       <form onSubmit={handleSubmit} className="glass rounded-2xl p-8 w-full max-w-sm">
         <div className="text-center mb-6">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-dark to-brand flex items-center justify-center text-2xl mx-auto mb-3">
-            🐑
+            🖥
           </div>
           <h1 className="text-xl font-bold">超级管理后台</h1>
-          <p className="text-xs text-muted mt-1">Xgoat.Cast Super Admin</p>
+          <p className="text-xs text-muted mt-1">CLSNBcast Super Admin</p>
         </div>
         <div className="space-y-4">
           <input

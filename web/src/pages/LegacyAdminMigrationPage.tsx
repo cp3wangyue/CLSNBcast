@@ -45,7 +45,7 @@ export default function LegacyAdminMigrationPage() {
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="glass-strong rounded-3xl border border-white/15 p-8 sm:p-10 max-w-xl text-center shadow-2xl">
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-dark to-brand flex items-center justify-center text-3xl mx-auto mb-5">
-          🐑
+          🖥
         </div>
         <h1 className="text-2xl font-bold">KOOK 管理后台地址已迁移</h1>
         <p className="text-sm text-muted leading-relaxed mt-4">

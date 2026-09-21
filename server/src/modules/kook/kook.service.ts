@@ -230,8 +230,11 @@ export class KookService implements OnModuleInit {
       }
     }
 
-    // 综合帮助指令（绑定/管理/使用说明，仅 /xchelp 触发）
-    if (content === '/xchelp' || content === 'xchelp') {
+    // 综合帮助指令（绑定/管理/使用说明，/cbhelp 触发；/xchelp 为待弃用别名）
+    if (
+      content === '/cbhelp' || content === 'cbhelp' ||
+      content === '/xchelp' || content === 'xchelp'
+    ) {
       await this.handleHelpCommand(event, guildId);
       return;
     }
@@ -284,7 +287,7 @@ export class KookService implements OnModuleInit {
     }
   }
 
-  /** Handle /xchelp command: owner gets bind/manage card, others get help with share button */
+  /** Handle /cbhelp command: owner gets bind/manage card, others get help with share button */
   private async handleHelpCommand(event: KookMessageEvent, guildId: string) {
     if (!guildId) {
       this.logger.warn('[HELP] No guildId resolved for help command');
@@ -451,7 +454,7 @@ export class KookService implements OnModuleInit {
     const serverConfig = this.getServerConfig(guildId);
     if (!serverConfig) {
       this.logger.warn(`button_click ignored for unbound or inactive server ${guildId || '(unknown)'}`);
-      await this.sendTempNotice(event.targetId, event.userId, '该服务器尚未绑定或当前不可用，请让服务器主先发送 /xchelp 完成绑定。');
+      await this.sendTempNotice(event.targetId, event.userId, '该服务器尚未绑定或当前不可用，请让服务器主先发送 /cbhelp 完成绑定。');
       return;
     }
 

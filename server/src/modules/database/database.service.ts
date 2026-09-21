@@ -141,7 +141,7 @@ export class DatabaseService implements OnModuleDestroy {
     if (!existsSync(dataDir)) {
       mkdirSync(dataDir, { recursive: true });
     }
-    const dbPath = join(dataDir, 'xgoatcast.db');
+    const dbPath = join(dataDir, 'clsnbcast.db');
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');

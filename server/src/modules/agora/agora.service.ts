@@ -13,7 +13,7 @@ export class AgoraService {
   ) {}
 
   generateChannelName(sessionShortId: string): string {
-    return 'xc_' + sessionShortId;
+    return 'cb_' + sessionShortId;
   }
 
   /** Generate token with per-server Agora config */
