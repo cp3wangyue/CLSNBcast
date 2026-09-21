@@ -382,4 +382,148 @@ describe('AgoraProviderService', () => {
       expect(() => service.onModuleInit()).not.toThrow();
     });
   });
+
+  // ===== 存量凭证迁移 =====
+
+  describe('存量服务器凭证迁移（onModuleInit）', () => {
+    /** 造一个持有明文 Agora 凭证的「旧库服务器」。 */
+    function seedLegacyServer(
+      serverId: string,
+      opts: { guildName?: string; tokenExpireSec?: number } = {},
+    ) {
+      db.createServer(serverId, opts.guildName ?? `服务器 ${serverId}`, 'owner-1', '服主');
+      db.updateServer(serverId, {
+        agoraAppId: APP_ID,
+        agoraAppCertificate: CERT,
+        ...(opts.tokenExpireSec !== undefined ? { agoraTokenExpireSec: opts.tokenExpireSec } : {}),
+      });
+    }
+
+    it('把明文凭证迁成 owner_type=space 的 Provider，并加密存储', () => {
+      seedLegacyServer('guild-1', { guildName: '测试服务器' });
+      service.onModuleInit();
+
+      const providers = service.listForAdminByOwner('space', 'guild-1');
+      expect(providers).toHaveLength(1);
+      expect(providers[0].name).toBe('测试服务器 自带凭证');
+      expect(providers[0].appId).toBe(APP_ID);
+      expect(providers[0].hasAppCertificate).toBe(true);
+
+      // 证书确实加密落库，且可解回原值
+      const stored = db.getProvider(providers[0].id)!;
+      expect(stored.appCertificateEnc).not.toContain(CERT);
+      expect(crypto.decrypt(stored.appCertificateEnc)).toBe(CERT);
+      expect(service.getWithSecrets(providers[0].id)!.appCertificate).toBe(CERT);
+    });
+
+    it('回填该服务器已有会话的 Provider 绑定', () => {
+      seedLegacyServer('guild-1');
+      for (const id of ['s1', 's2']) {
+        db.createSession({
+          id, token: `tok-${id}`, channel: `cb_${id}`, serverId: 'guild-1',
+          sharerUserId: 'u1', sharerUsername: 'u', guildId: 'guild-1', targetChannelId: 'c1',
+          status: 'ended', viewerCount: 0, peakViewers: 0, totalViewerJoins: 0,
+          viewerDurationMs: 0, quality: '1080p_2', cardMessageId: null, manualCreated: 0,
+          createdAt: 1, startedAt: null, endedAt: null, durationMs: null, lastHeartbeat: 1,
+          graceStartedAt: null, graceReason: null, lastViewerAt: null,
+          publisherClientId: null, lowLatency: 0,
+          providerId: '', agoraAppId: '',
+        });
+      }
+
+      service.onModuleInit();
+
+      const provider = service.listForAdminByOwner('space', 'guild-1')[0];
+      for (const id of ['s1', 's2']) {
+        const row = db.getSessionById(id)!;
+        expect(row.providerId).toBe(provider.id);
+        expect(row.agoraAppId).toBe(APP_ID);
+      }
+    });
+
+    it('幂等：重复启动不会重复创建 Provider', () => {
+      seedLegacyServer('guild-1');
+      service.onModuleInit();
+      service.onModuleInit();
+      service.onModuleInit();
+
+      expect(service.listForAdminByOwner('space', 'guild-1')).toHaveLength(1);
+    });
+
+    it('不清空服务器的明文证书（旧 Token 路径仍在读它，Phase 1-3 才清）', () => {
+      seedLegacyServer('guild-1');
+      service.onModuleInit();
+
+      expect(db.getServer('guild-1')!.agoraAppCertificate).toBe(CERT);
+    });
+
+    it('没有主密钥时跳过迁移并告警（而不是崩溃）', () => {
+      seedLegacyServer('guild-1');
+      delete process.env.SECRET_ENCRYPTION_KEY;
+      const noKeyService = new AgoraProviderService(db, new SecretCryptoService());
+      const warnSpy = vi.spyOn(Logger.prototype, 'warn');
+
+      expect(() => noKeyService.onModuleInit()).not.toThrow();
+      expect(service.listForAdminByOwner('space', 'guild-1')).toHaveLength(0);
+      expect(warnSpy.mock.calls.some((c) => String(c[0]).includes('cannot be migrated'))).toBe(true);
+    });
+
+    it('多个服务器各自迁成独立 Provider', () => {
+      seedLegacyServer('guild-1');
+      seedLegacyServer('guild-2');
+      service.onModuleInit();
+
+      expect(service.listForAdminByOwner('space', 'guild-1')).toHaveLength(1);
+      expect(service.listForAdminByOwner('space', 'guild-2')).toHaveLength(1);
+      expect(service.listForAdmin()).toHaveLength(2);
+    });
+
+    it('只有一个服务器凭证坏掉时，其余仍完成迁移', () => {
+      // 第一个服务器的 App ID 含空白 → 校验失败
+      db.createServer('bad', '坏服务器', 'o', 'o');
+      db.updateServer('bad', { agoraAppId: 'has space', agoraAppCertificate: CERT });
+      seedLegacyServer('guild-2');
+
+      const errorSpy = vi.spyOn(Logger.prototype, 'error');
+      expect(() => service.onModuleInit()).not.toThrow();
+
+      expect(service.listForAdminByOwner('space', 'bad')).toHaveLength(0);
+      expect(service.listForAdminByOwner('space', 'guild-2')).toHaveLength(1);
+      expect(errorSpy).toHaveBeenCalled();
+    });
+
+    it('guildName 为空时用 serverId 兜底，不因校验失败中断启动', () => {
+      seedLegacyServer('guild-x', { guildName: '' });
+      expect(() => service.onModuleInit()).not.toThrow();
+
+      const providers = service.listForAdminByOwner('space', 'guild-x');
+      expect(providers).toHaveLength(1);
+      expect(providers[0].name).toContain('guild-x');
+    });
+
+    it('越界的 tokenExpireSec 被夹取到合法区间', () => {
+      seedLegacyServer('guild-low', { tokenExpireSec: 5 });
+      seedLegacyServer('guild-high', { tokenExpireSec: 999999 });
+      service.onModuleInit();
+
+      expect(service.listForAdminByOwner('space', 'guild-low')[0].tokenExpireSec).toBe(60);
+      expect(service.listForAdminByOwner('space', 'guild-high')[0].tokenExpireSec).toBe(24 * 3600);
+    });
+
+    it('没有存量凭证时不做任何事', () => {
+      db.createServer('guild-empty', '无凭证服务器', 'o', 'o');
+      service.onModuleInit();
+      expect(service.listForAdmin()).toHaveLength(0);
+    });
+
+    it('迁移日志不泄露明文证书', () => {
+      seedLegacyServer('guild-1');
+      const logSpy = vi.spyOn(Logger.prototype, 'log');
+      service.onModuleInit();
+
+      for (const call of logSpy.mock.calls) {
+        expect(call.map(String).join(' ')).not.toContain(CERT);
+      }
+    });
+  });
 });

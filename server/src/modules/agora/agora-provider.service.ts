@@ -120,6 +120,78 @@ export class AgoraProviderService implements OnModuleInit {
     // 启动门禁：库里已有密文、但主密钥缺失或不可用时，让进程直接失败退出。
     // 否则应用会带着「读不出凭证」的状态继续运行，问题被推迟到用户开始共享时才暴露。
     this.crypto.assertUsableForExistingSecrets(this.db.listProviderCiphertexts());
+    this.adoptLegacyServerCredentials();
+  }
+
+  /**
+   * 把存量「每服务器一份明文 Agora 配置」迁移成 `owner_type='space'` 的 Provider 行。
+   *
+   * 为什么放在这里而不是 migration：
+   * - 需要加密服务，而 migration 是纯 DB 函数，不应依赖运行时服务；
+   * - 未配置主密钥时必须能安全跳过（没有密钥就无法加密），migration 没有这种条件语义。
+   *
+   * 幂等：同 `ownerId` 已存在 space Provider 就跳过，因此每次启动重复执行是安全的。
+   *
+   * ⚠️ 本步**不清空** `servers.agora_app_certificate` —— 旧 Token 路径仍在读它。
+   * 清空发生在 Token 签发切到 Provider 之后（Phase 1-3）。
+   */
+  private adoptLegacyServerCredentials(): void {
+    const candidates = this.db.listServersWithPlaintextCredentials();
+    if (candidates.length === 0) return;
+
+    if (!this.crypto.isConfigured) {
+      this.logger.warn(
+        `${candidates.length} server(s) still hold plaintext Agora credentials, but the ` +
+          'encryption key is not configured, so they cannot be migrated. Set ' +
+          'SECRET_ENCRYPTION_KEY and restart.',
+      );
+      return;
+    }
+
+    let adopted = 0;
+    for (const server of candidates) {
+      if (this.db.listProvidersByOwner('space', server.serverId).length > 0) continue;
+
+      try {
+        const provider = this.create({
+          ownerType: 'space',
+          ownerId: server.serverId,
+          // 服务器名可能为空，此时回退到 serverId，避免校验失败打断启动
+          name: `${server.guildName?.trim() || server.serverId} 自带凭证`,
+          appId: server.agoraAppId,
+          appCertificate: server.agoraAppCertificate,
+          // 存量值可能不在合法区间内，夹取而不是抛错，避免一个坏配置卡住整个启动
+          tokenExpireSec: this.clampTokenExpire(server.agoraTokenExpireSec),
+          note: '由存量服务器配置自动迁移',
+        });
+
+        const backfilled = this.db.backfillSessionsProvider(
+          server.serverId,
+          provider.id,
+          server.agoraAppId,
+        );
+        adopted += 1;
+        this.logger.log(
+          `Adopted legacy Agora credentials of server ${server.serverId} as provider ` +
+            `${provider.id} (backfilled ${backfilled} session(s))`,
+        );
+      } catch (error) {
+        // 单个服务器的坏数据不应阻止应用启动，其余服务器仍应完成迁移
+        this.logger.error(
+          `Failed to adopt legacy Agora credentials of server ${server.serverId}: ` +
+            `${(error as Error).message}`,
+        );
+      }
+    }
+
+    if (adopted > 0) {
+      this.logger.log(`Adopted ${adopted} legacy Agora credential set(s) into the provider pool`);
+    }
+  }
+
+  private clampTokenExpire(value: number | undefined): number {
+    if (!Number.isFinite(value)) return 3600;
+    return Math.min(MAX_TOKEN_EXPIRE_SEC, Math.max(MIN_TOKEN_EXPIRE_SEC, Math.floor(value as number)));
   }
 
   // ===== 管理端读取 =====

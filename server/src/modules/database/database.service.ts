@@ -338,6 +338,31 @@ export class DatabaseService implements OnModuleDestroy {
     return rows.map(row => this.mapServerRow(row));
   }
 
+  /**
+   * 还持有**明文** Agora 凭证的服务器。
+   *
+   * 用于两件事：把存量凭证迁入 Provider 池，以及在没有主密钥时告警
+   * （无法加密 → 迁移不了，必须让运维知道）。
+   */
+  listServersWithPlaintextCredentials(): ServerRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM servers WHERE agora_app_id != '' AND agora_app_certificate != ''")
+      .all() as any[];
+    return rows.map((row) => this.mapServerRow(row));
+  }
+
+  /**
+   * 清空服务器的明文证书。
+   *
+   * ⚠️ 只能在 Token 签发路径已经切到 Provider 之后调用 —— 在那之前旧路径
+   * （`generateToken` 读 `servers.agora_app_certificate`）仍然依赖它。
+   */
+  clearServerCertificate(serverId: string): void {
+    this.db
+      .prepare("UPDATE servers SET agora_app_certificate = '', updated_at = ? WHERE server_id = ?")
+      .run(Date.now(), serverId);
+  }
+
   /** 将数据库行（下划线字段名）映射为 ServerSession（驼峰字段名） */
   private mapSessionRow(row: any): ServerSession {
     return {
@@ -816,6 +841,20 @@ export class DatabaseService implements OnModuleDestroy {
         `bindSessionProvider: refused to rebind session ${sessionId} (already bound or not found)`,
       );
     }
+  }
+
+  /**
+   * 为某服务器尚未绑定 Provider 的历史会话回填绑定。返回受影响行数。
+   *
+   * 用 `provider_id = ''` 作条件，因此不会覆盖已经绑定的会话。
+   */
+  backfillSessionsProvider(serverId: string, providerId: string, agoraAppId: string): number {
+    return this.db
+      .prepare(
+        `UPDATE sessions SET provider_id = ?, agora_app_id = ?
+         WHERE server_id = ? AND provider_id = ''`,
+      )
+      .run(providerId, agoraAppId, serverId).changes;
   }
 
   private readonly ALLOWED_SESSION_COLS = new Set([

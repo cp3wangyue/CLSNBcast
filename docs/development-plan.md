@@ -104,13 +104,19 @@ npm run verify        # = typecheck + build + test
   - [x] 单测 46 个：owner 三态、优先级排序、quota 可空、14 项校验、证书确实加密落库、
         管理端视图序列化后不含明文、更新时 `undefined` 语义保持原证书、主密钥不匹配时解密抛错、
         启动门禁三态
-- [ ] **1-2 存量凭证迁移**
-  - [ ] 把每个配了 `agora_app_id` + `agora_app_certificate` 的服务器，转成 `owner_type='space'`
+- [x] **1-2 存量凭证迁移**
+  - [x] 把每个配了 `agora_app_id` + `agora_app_certificate` 的服务器，转成 `owner_type='space'`
         的 provider 行（证书加密）。**放在 `AgoraProviderService.onModuleInit` 而非 migration**：
         它需要加密服务，且必须能在「未配置密钥」时安全跳过 —— migration 是纯 DB 函数，
         不应依赖运行时服务
-  - [ ] 清空 `servers.agora_app_certificate`（明文消失）
-  - [ ] 回填存量 `sessions.provider_id` / `agora_app_id`
+  - [x] 回填该服务器存量 `sessions.provider_id` / `agora_app_id`（条件 `provider_id = ''`，不覆盖已绑定）
+  - [x] 幂等：同 ownerId 已有 space Provider 就跳过，重复启动安全
+  - [x] 健壮性：单个服务器数据坏掉（App ID 含空白等）只记 error，不阻断其余迁移与启动；
+        `guildName` 为空回退 serverId；越界 `tokenExpireSec` 夹取到 `[60, 86400]` 而不是抛错
+  - [x] ⚠️ 本步**不清空** `servers.agora_app_certificate` —— 旧 Token 路径仍在读它，
+        清空必须与 Token 签发切换同一 commit（见 1-3）
+  - [x] 单测 11 个：迁移与加密落库、会话回填、三次启动仍只有一个 Provider、无密钥时告警跳过、
+        多服务器各自迁移、坏数据隔离、空名兜底、过期时间夹取、日志不含明文
 - [ ] **1-3 Token 签发改造（修复 App ID 漂移）**
   - [ ] `generateToken(session, uid, role)` 取代 `generateToken(channel, uid, role, serverId)`
   - [ ] App ID 一致性断言 + `PROVIDER_APPID_CHANGED` 错误码
