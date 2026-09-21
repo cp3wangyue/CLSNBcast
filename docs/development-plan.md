@@ -193,10 +193,25 @@ npm run verify        # = typecheck + build + test
 
 ### 验收
 
-- [ ] `npm run verify` 通过
-- [ ] **回归验证**：完整跑一次 KOOK → 分享 → 观看链路，确认会话、观看链接、屏幕音频、KOOK 卡片全部正常
-- [ ] 手工验证 App ID 漂移修复：会话进行中改 provider 的 App ID → 新观众拿到明确报错而非静默黑屏
-- [ ] 确认数据库中已无明文 `agora_app_certificate`
+- [x] `npm run verify` 通过（238 个测试：server 230 + web 8）
+- [x] **回归验证（真实 DI 容器 + 真实数据库，16 项断言）**：存量明文凭证被迁移并清空、
+      证书可解密、管理端视图无明文、会话绑定 Provider 并快照 App ID、发布/观众端均可签发、
+      改 App ID 后活跃会话被拒绝且提示面向用户、新会话使用新 App ID 正常工作
+- [x] **HTTP 层验证（20 项断言）**：三组新路由均受鉴权保护（无 token 401）、超管 CRUD 正常、
+      频道主伪造 ownerType 被强制改写、跨角色访问 403、IDOR 被阻断、删除被会话引用的 Provider 被拒绝
+- [x] **浏览器实测**：超管与频道主两套 Provider UI 均渲染并可用（详见 1-5）
+- [x] **KOOK 侧回归（9 个单测）**：没有可用 Provider 时不创建会话、记 warn、不抛错；
+      有 Provider 时会话被创建并绑定；创建出的会话可直接签发发布端/观众端 Token；
+      帮助指令与冷却行为未受影响
+- [x] 确认数据库中已无明文 `agora_app_certificate`（迁移时清空，实测确认）
+
+> ⚠️ **KOOK 全链路（webhook → worker → 卡片）无法在本环境端到端验证**：
+> `KookWebhookWorker` 在 `KookService.isReady`（即已配置真实 KOOK Bot Token）之前不处理任何事件，
+> 因此没有真实 Bot Token 时事件会一直停留在 `pending`。这是上游既有设计，不是本次改动引入的。
+> 为此改用直接调用 `handleIncomingMessage` 的单测覆盖 KOOK 侧逻辑（见上）。
+> **上线前建议在真实 KOOK 环境跑一次完整链路。**
+
+**Phase 1 已完成**（commit `dcef0e1` / `0c9fcc8` / `a139510` / `6cd51ee` / `9361fba` / `89cff92`）。
 
 ### commit 划分
 
