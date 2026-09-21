@@ -48,18 +48,30 @@ npm run verify        # = typecheck + build + test
         会把 tsc 推断的 `rootDir` 上移，产物从 `dist/main.js` 变成 `dist/src/main.js`，
         直接打断 `Dockerfile` 的 `CMD` 与 `deploy.sh` 的存在性检查。已在
         `server/tsconfig.build.json` 显式固定 `rootDir: "./src"` 并排除构建配置
-- [ ] **0-3 `SecretCryptoService`**
-  - [ ] AES-256-GCM + 随机 IV + `v1:<iv>:<tag>:<ct>` 版本前缀
-  - [ ] `SECRET_ENCRYPTION_KEY` 环境变量 + 启动门禁（有密文但无密钥 → fatal 退出）
-  - [ ] 单元测试：加解密往返、篡改密文必须抛错、错误密钥必须抛错、日志不泄露明文
-  - [ ] 无消费者，纯新增，零回归风险
+  - [x] ⚠️ 顺带修一个**上游遗留的严重缺陷**：`tsconfig.json` 的 `incremental: true` 把
+        增量信息写到 `dist` 之外的 `server/tsconfig.build.tsbuildinfo`，而 `nest-cli.json`
+        开了 `deleteOutDir`（每次构建先清空 `dist`）。两者组合导致**第二次及以后的构建
+        什么都不输出**，`dist` 变成空目录或只剩改动过的文件 —— `deploy.sh` 与 Docker 镜像
+        都会因此拿到残缺产物。已在该文件设 `incremental: false`（dist 每次被清空，增量缓存
+        本来也无收益）
+- [x] **0-3 `SecretCryptoService`**
+  - [x] AES-256-GCM + 随机 IV + `v1:<iv>:<tag>:<ct>` 版本前缀
+  - [x] `SECRET_ENCRYPTION_KEY` 环境变量：格式非法时**构造即抛错**（启动阶段失败）
+  - [x] 启动门禁 `assertUsableForExistingSecrets()`：库里已有密文但密钥缺失 → 抛错退出。
+        调用方（Phase 1 的 Provider 仓储）负责传入待检查的密文列值，服务本身不感知表结构
+  - [x] 单元测试（37 个）：往返、随机 IV 非确定性、信封格式、错误密钥、密文/标签/IV 篡改、
+        段数与版本异常、错误信息与日志均不含密钥或明文
+  - [x] `CryptoModule` 以 `@Global` 注册进 `AppModule`；`.env.example` 补 `SECRET_ENCRYPTION_KEY`
+  - [x] 无消费者，纯新增，零回归风险
 
 ### 验收
 
-- [x] `npm run verify` 通过
+- [x] `npm run verify` 通过（83 个单测：server 75 + web 8）
 - [x] 用真实 SQLite 文件跑通三条路径：新库建库、存量库（无 `schema_migrations`）接管且数据无损、
       重复启动幂等
-- [x] 确认 `server/dist/main.js` 存在（部署契约）
+- [x] 确认 `server/dist/main.js` 存在，且**连续三次构建**都产出完整 `dist`（47 个 js、11 个模块）
+- [x] 用真实 Nest 模块图启动验证四种密钥场景：未设密钥可启动、hex/base64 密钥可用且往返正确、
+      非法密钥 fail-fast 退出码非 0
 - [ ] Phase 0 全部完成后：删除 `data/` 后启动，确认新库结构与原有一致
 
 ### commit 划分

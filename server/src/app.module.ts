@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { EventsModule } from './modules/events/events.module';
 import { DatabaseModule } from './modules/database/database.module';
+import { CryptoModule } from './modules/crypto/crypto.module';
 import { AgoraModule } from './modules/agora/agora.module';
 import { SessionModule } from './modules/session/session.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -14,6 +15,7 @@ import { NoticesModule } from './modules/notices/notices.module';
   imports: [
     EventsModule,
     DatabaseModule,
+    CryptoModule,
     AgoraModule,
     SessionModule,
     AuthModule,

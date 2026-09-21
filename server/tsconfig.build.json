@@ -5,7 +5,14 @@
     // 没有它时 tsc 会把 rootDir 推断为所有输入文件的公共父目录：一旦 server/ 根目录下
     // 多出一个 .ts（例如 vitest.config.ts），产物就会从 dist/main.js 变成 dist/src/main.js，
     // 直接打断 Dockerfile 的 CMD 与 deploy.sh 的存在性检查。
-    "rootDir": "./src"
+    "rootDir": "./src",
+    // ⚠️ 必须关闭增量编译。
+    // nest-cli.json 开了 deleteOutDir（每次构建先清空 dist），而增量信息文件写在
+    // dist 之外（server/tsconfig.build.tsbuildinfo）。两者组合会导致：第二次及以后的
+    // 构建里 tsc 认为「全部已是最新」，于是**什么都不输出**，dist 变成空目录或只剩改动过的
+    // 文件，Dockerfile 的 CMD 与 deploy.sh 随即失效。
+    // 由于 dist 每次都被清空，增量缓存本来也不可能有收益。
+    "incremental": false
   },
   "exclude": [
     "node_modules",

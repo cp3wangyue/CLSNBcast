@@ -82,6 +82,8 @@
 | 9 | `kook.service.ts` 死代码 | `kook.service.ts:187-192` 拼了含 `appCertificate` 的 `serverConfig.agora`，无任何消费者 | 无用代码 + 明文证书在内存里多一份 | Phase 1 顺手清理 |
 | 10 | `.env.example` 不完整 | `.env.example` | 代码读取的 `KOOK_BOT_TOKEN`、`LEGACY_ADMIN_SUNSET_AT` 未记录 | Phase 4 |
 | 11 | `deploy.sh` 硬编码默认值 | `deploy.sh:4,5,6` `SSH_HOST=rainyun`、`REMOTE_DIR=/root/clsnbcast` | 换环境需改脚本 | Phase 4 |
+| 12 | ✅ **`incremental` + `deleteOutDir` 组合导致产物残缺**（上游遗留，严重） | `server/tsconfig.json` 的 `incremental: true` 把增量信息写到 `dist` 之外的 `server/tsconfig.build.tsbuildinfo`，而 `server/nest-cli.json` 开了 `deleteOutDir` | **第二次及以后的构建什么都不输出**，`dist` 变成空目录或只剩改动过的文件。`deploy.sh` 与 Docker 镜像会拿到残缺产物，容器启动即 `MODULE_NOT_FOUND` | **Phase 0 已修**（`tsconfig.build.json` 设 `incremental: false`） |
+| 13 | ✅ **`rootDir` 推断导致入口点漂移** | `server/tsconfig.build.json` 原先未固定 `rootDir` | 在 `server/` 根目录新增任何 `.ts`（如 `vitest.config.ts`）都会把 `rootDir` 上移，产物从 `dist/main.js` 变成 `dist/src/main.js`，打断 `Dockerfile` 的 `CMD` 与 `deploy.sh` 的存在性检查 | **Phase 0 已修**（显式固定 `rootDir: "./src"`） |
 
 ---
 
