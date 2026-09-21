@@ -541,33 +541,28 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
     });
 
     it('✅ 账单明细显示修正后的 4.5，而不是上游的 4.57', () => {
-      const session = createActiveSession();
-      seedViewerInterval(session, 600_000);
-      sessions.endSession(session.id, 'manual');
+      const session = createEndedSessionWithViewing(600_000);
 
-      const info = sessions.toInfo(sessions.getById(session.id)!);
-
+      const info = sessions.toInfo(session);
       expect(info.billingDetail).toContain('系数4.5');
       expect(info.billingDetail).not.toContain('4.57');
     });
 
     it('低延迟模式在账单明细里标注为互动直播', () => {
-      // 低延迟模式是**会话级**设置，因此会话与区间必须用同一个模式
-      const session = createActiveSession('client-1', true);
-      seedViewerInterval(session, 600_000, 'Full HD 全高清', true);
-      sessions.endSession(session.id, 'manual');
+      // 低延迟模式是**会话级**设置，因此会话与区间必须用同一个模式。
+      // 用带显式时间窗的构造器：真实耗时可能不足 1ms，那会让 durationMs 为 0
+      // 从而让账单明细退化成 '-'（随机失败）。
+      const session = createEndedSessionWithViewing(600_000, 'client-1', 'Full HD 全高清', true);
 
-      const info = sessions.toInfo(sessions.getById(session.id)!);
+      const info = sessions.toInfo(session);
       expect(info.billingDetail).toContain('互动直播');
       expect(info.billingDetail).toContain('系数9');
     });
 
     it('🔑 标准时长取自区间快照的系数，而不是用当前档位重算', () => {
-      const session = createActiveSession();
-      seedViewerInterval(session, 3_600_000, 'HD 高清', false); // 1 小时 × 系数 2
-      sessions.endSession(session.id, 'manual');
+      const session = createEndedSessionWithViewing(3_600_000, 'client-1', 'HD 高清'); // 1 小时 × 系数 2
+      const info = sessions.toInfo(session);
 
-      const info = sessions.toInfo(sessions.getById(session.id)!);
       // 观众部分 = 60 分钟 × 2 = 120 标准分钟
       expect(info.standardMinutes).toBeGreaterThanOrEqual(120);
 

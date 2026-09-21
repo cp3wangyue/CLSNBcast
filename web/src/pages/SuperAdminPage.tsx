@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  BarChart3,
   Bell,
   ChevronDown,
   ChevronUp,
@@ -18,14 +19,16 @@ import {
 import { api, getSuperAdminToken, clearSuperAdminToken } from '../lib/api';
 import { cn } from '../lib/utils';
 import { ProviderManager } from '../components/providers/ProviderManager';
+import { UsageDashboardPanel } from '../components/usage/UsageDashboardPanel';
 import type { AgoraProvider } from '../types';
 
-type Tab = 'config' | 'providers' | 'kook' | 'notices';
+type Tab = 'config' | 'providers' | 'usage' | 'kook' | 'notices';
 type ServerDetailTab = 'events' | 'sessions';
 
 const TABS: { id: Tab; label: string; icon: typeof Settings }[] = [
   { id: 'config', label: '全局配置', icon: Settings },
   { id: 'providers', label: 'Agora 凭证池', icon: KeyRound },
+  { id: 'usage', label: '用量看板', icon: BarChart3 },
   { id: 'kook', label: 'KOOK 服务器', icon: Server },
   { id: 'notices', label: '通知管理', icon: Bell },
 ];
@@ -129,6 +132,7 @@ export default function SuperAdminPage() {
 
         {tab === 'config' && <GlobalConfigPanel />}
         {tab === 'providers' && <ProvidersPanel />}
+        {tab === 'usage' && <UsageDashboardPanel />}
         {tab === 'kook' && !selectedServerId && (
           <ServerListPanel onSelectServer={handleServerSelect} />
         )}

@@ -7,6 +7,7 @@ import { DatabaseService } from '../database/database.service';
 import { SecretCryptoService } from '../crypto/secret-crypto.service';
 import { AgoraProviderService } from './agora-provider.service';
 import { QualityConfigService } from '../quality/quality-config.service';
+import { UsageLedgerService } from '../usage/usage-ledger.service';
 import { SuperAdminController } from '../super-admin/super-admin.controller';
 import { ServerAdminController } from '../server-admin/server-admin.controller';
 
@@ -22,6 +23,7 @@ describe('Agora Provider 管理端接口', () => {
   let db: DatabaseService;
   let providers: AgoraProviderService;
   let qualityConfig: QualityConfigService;
+  let ledger: UsageLedgerService;
   let superAdmin: SuperAdminController;
   let spaceAdmin: ServerAdminController;
 
@@ -39,7 +41,8 @@ describe('Agora Provider 管理端接口', () => {
     providers = new AgoraProviderService(db, new SecretCryptoService());
     qualityConfig = new QualityConfigService(db);
     qualityConfig.onModuleInit();
-    superAdmin = new SuperAdminController(db, providers, qualityConfig);
+    ledger = new UsageLedgerService(db, qualityConfig);
+    superAdmin = new SuperAdminController(db, providers, qualityConfig, ledger);
     spaceAdmin = new ServerAdminController(db, providers);
 
     db.createServer(SPACE_A, 'A 服务器', 'owner-a', '服主A');

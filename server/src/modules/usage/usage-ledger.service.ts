@@ -9,6 +9,29 @@ import {
 import { resolveBillingProfile } from './usage-billing';
 import { DEFAULT_USAGE_TIMEZONE, currentPeriodKey } from './usage-period';
 import { QualityConfigService } from '../quality/quality-config.service';
+import { evaluateQuota } from '../agora/provider-quota';
+
+/** 超管用量看板的一行。 */
+export interface UsageDashboardRow {
+  providerId: string;
+  name: string;
+  ownerType: string;
+  ownerId: string;
+  enabled: boolean;
+  healthStatus: string;
+  periodKey: string;
+  standardMinutes: number;
+  publisherMinutes: number;
+  viewerMinutes: number;
+  sessionCount: number;
+  /** null = 不限量 */
+  quotaMinutes: number | null;
+  quotaEnforced: boolean;
+  quotaExceeded: boolean;
+  /** 配额未启用或不限量时为 null */
+  quotaUsageRatio: number | null;
+  lastUsedAt: number | null;
+}
 
 export interface OpenIntervalInput {
   sessionId: string;
@@ -237,6 +260,11 @@ export class UsageLedgerService implements OnModuleInit {
     return closed + live;
   }
 
+  /** 当前计费周期键（时区取自可配置项）。 */
+  resolvePeriodKey(now: Date = new Date()): string {
+    return currentPeriodKey(this.resolveTimeZone(), now);
+  }
+
   /** 某会话的全部区间，按开始时间升序。 */
   listSessionIntervals(sessionId: string): UsageIntervalRecord[] {
     return this.db.listUsageIntervalsBySession(sessionId);
@@ -343,5 +371,64 @@ export class UsageLedgerService implements OnModuleInit {
    */
   getMonthlyStandardMinutes(providerId: string, periodKey: string): number {
     return this.db.getProviderUsageMonthly(providerId, periodKey)?.standardMinutes ?? 0;
+  }
+
+  // ===== 用量看板 =====
+
+  /**
+   * 超管用量看板：每个 Provider 一行，带配额状态。
+   *
+   * 看板**只读** `provider_usage_monthly` 缓存与 Provider 配置，不扫账本明细 ——
+   * 汇总由定时任务负责（见 `UsageRollupScheduler`）。
+   *
+   * 未出现在 `quality_config` / 无 Provider 记录时同样要展示，
+   * 因此以「已配置的 Provider」为准，缺失的汇总按 0 处理。
+   */
+  getUsageDashboard(periodKey?: string): UsageDashboardRow[] {
+    const key = periodKey ?? currentPeriodKey(this.resolveTimeZone());
+    const rollup = new Map(
+      this.db.listProviderUsageMonthly(key).map((row) => [row.providerId, row]),
+    );
+    const providers = this.db.listProviders();
+    const quotaLimit = (p: { monthlyQuotaStandardMinutes: number | null; quotaEnforced: number }) =>
+      p.monthlyQuotaStandardMinutes;
+
+    return providers.map((provider) => {
+      const usage = rollup.get(provider.id);
+      const state = evaluateQuota(provider, this.resolveTimeZone());
+      return {
+        providerId: provider.id,
+        name: provider.name,
+        ownerType: provider.ownerType,
+        ownerId: provider.ownerId,
+        enabled: !!provider.enabled,
+        healthStatus: provider.healthStatus,
+        periodKey: key,
+        standardMinutes: usage?.standardMinutes ?? 0,
+        publisherMinutes: usage?.publisherMinutes ?? 0,
+        viewerMinutes: usage?.viewerMinutes ?? 0,
+        sessionCount: usage?.sessionCount ?? 0,
+        quotaMinutes: quotaLimit(provider),
+        quotaEnforced: !!provider.quotaEnforced,
+        quotaExceeded: state.exceeded,
+        /** 配额未启用时为 null，避免前端画出一条假的 0% 进度 */
+        quotaUsageRatio:
+          state.enforced && provider.monthlyQuotaStandardMinutes
+            ? (usage?.standardMinutes ?? 0) / provider.monthlyQuotaStandardMinutes
+            : null,
+        lastUsedAt: provider.lastUsedAt,
+      };
+    });
+  }
+
+  /** 某会话的用量明细（看板下钻）。 */
+  getSessionUsage(sessionId: string): {
+    intervals: UsageIntervalRecord[];
+    events: ReturnType<DatabaseService['listUsageEventsBySession']>;
+  } {
+    return {
+      intervals: this.db.listUsageIntervalsBySession(sessionId),
+      events: this.db.listUsageEventsBySession(sessionId),
+    };
   }
 }

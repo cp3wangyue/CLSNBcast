@@ -16,6 +16,7 @@ import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
 import { AgoraProviderService } from '../agora/agora-provider.service';
 import { QualityConfigService } from '../quality/quality-config.service';
+import { UsageLedgerService } from '../usage/usage-ledger.service';
 import {
   CreateAgoraProviderDto,
   UpdateAgoraProviderDto,
@@ -43,6 +44,7 @@ export class SuperAdminController {
     private readonly db: DatabaseService,
     private readonly providers: AgoraProviderService,
     private readonly qualityConfig: QualityConfigService,
+    private readonly usage: UsageLedgerService,
   ) {
     const pwd = process.env.SUPER_ADMIN_PASSWORD!;
     this.superPasswordHash = bcrypt.hashSync(pwd, 10);
@@ -399,6 +401,40 @@ export class SuperAdminController {
   @Delete('providers/:id')
   removeProvider(@Param('id') id: string) {
     return this.providers.remove(id);
+  }
+
+  // ===== 用量看板 =====
+
+  /**
+   * Provider 用量看板。
+   *
+   * `period` 省略时为当前计费周期（时区取自 `quality_config`）。
+   * 数据来自 `provider_usage_monthly`，由定时任务从账本重算；
+   * 事实来源始终是 `usage_intervals`。
+   */
+  @Get('usage')
+  getUsage(@Query('period') period?: string) {
+    const rows = this.usage.getUsageDashboard(period);
+    return {
+      period: rows.length > 0 ? rows[0].periodKey : (period ?? ''),
+      timezone: this.qualityConfig.getUsageTimezone(),
+      rows,
+    };
+  }
+
+  /** 手动触发一次汇总（改完配置或排查时用，不必等定时任务）。 */
+  @Post('usage/rebuild')
+  @HttpCode(HttpStatus.OK)
+  rebuildUsage(@Query('period') period?: string) {
+    const key = period ?? this.usage.resolvePeriodKey();
+    this.usage.rebuildMonthlyRollup(key);
+    return { ok: true, period: key };
+  }
+
+  /** 单个会话的账本明细（看板下钻）。 */
+  @Get('usage/sessions/:sessionId')
+  getSessionUsage(@Param('sessionId') sessionId: string) {
+    return this.usage.getSessionUsage(sessionId);
   }
 
   private toCreateRequest(dto: CreateAgoraProviderDto) {

@@ -289,11 +289,26 @@ npm run verify        # = typecheck + build + test
   - [x] 单测 25（配置服务）+ 新增账单展示断言；**E2E 15 项**全部通过
   - [x] 端到端账目校验：1 小时 Full HD 极速直播 = 主播 60 + 观众 270 = **330 标准分钟**，
         与手算一致；明细显示「系数4.5」且不含 4.57
-- [ ] **2-4 quota 强制与用量看板**
-  - [ ] quota 判断读 `provider_usage_monthly`（O(1)）
-  - [ ] 达到阈值 → **停止分配新会话**，不中断进行中的会话
-  - [ ] 超管看板：按 provider / 月份看标准分钟、会话数、观众分钟、主播分钟
-  - [ ] 单测：阈值边界、周期键跨月、quota_enforced=0 时不拦截
+- [x] **2-4 quota 强制与用量看板**
+  - [x] `UsageRollupScheduler`：每 10 分钟重算**当前 + 上一个**周期；
+        同时重算上一周期是因为跨月会话可能在次月初才结算完，只算当前会漏
+  - [x] 启动时先汇总一次（`AppModule.onModuleInit`），避免刚部署完配额判断读到空缓存
+  - [x] 超管看板 `GET /api/super/usage`：按 Provider / 月份看标准分钟、会话数、
+        观众分钟、主播分钟、配额进度与已达配额标记
+  - [x] `POST /api/super/usage/rebuild`：手动触发重算（改完配置不用等定时任务）
+  - [x] `GET /api/super/usage/sessions/:id`：会话账本明细（看板下钻）
+  - [x] 达到阈值 → **停止分配新会话**，进行中的会话不中断（Phase 1-4 已实现并单测覆盖）
+  - [x] 配额未启用或不限量时 `quotaUsageRatio` 为 **null**，避免前端画出假的 0% 进度
+  - [x] 看板**只读** `provider_usage_monthly` 缓存，不扫账本明细；事实来源仍是 `usage_intervals`
+  - [x] 🔒 汇总失败只记 error，不打断定时任务
+  - [x] 前端：`web/src/components/usage/UsageDashboardPanel.tsx` + 超管新增「用量看板」标签页
+  - [x] 单测 21 个（周期键退位含跨年、定时任务写汇总、上一周期也重算、失败只记 error、
+        看板各字段、exceeded 与 ratio 边界、指定周期、下钻）
+  - [x] **HTTP 验证 19 项**：看板接口、时区随配置、手动重算、270 标准分钟、
+        已达配额标记、无限配额 ratio 为 null、Provider 配额缓存同步、下钻、未鉴权 401
+  - [x] **浏览器实测**：标签页渲染、周期与时区显示、两个 Provider 分行、
+        配额列「不限」与「0 / 10 0%」、产生用量后显示「270 / 50 → 540%」并打上**已达配额**标记、
+        「立即重算」按钮可用
 - [ ] **2-5（可选，后置）官方用量对账**
   - [ ] 调 Agora 官方用量 API 写入 `usage_reconciliation`
   - [ ] 只做展示，**业务逻辑不依赖**

@@ -45,6 +45,78 @@ export interface AgoraTokenResponse {
   expireSec: number;
 }
 
+// ===== Usage Dashboard =====
+
+export interface UsageDashboardRow {
+  providerId: string;
+  name: string;
+  ownerType: string;
+  ownerId: string;
+  enabled: boolean;
+  healthStatus: string;
+  periodKey: string;
+  standardMinutes: number;
+  publisherMinutes: number;
+  viewerMinutes: number;
+  sessionCount: number;
+  /** null = 不限量 */
+  quotaMinutes: number | null;
+  quotaEnforced: boolean;
+  quotaExceeded: boolean;
+  /** 配额未启用或不限量时为 null */
+  quotaUsageRatio: number | null;
+  lastUsedAt: number | null;
+}
+
+export interface UsageDashboard {
+  period: string;
+  timezone: string;
+  rows: UsageDashboardRow[];
+}
+
+/** 分页/下钻用的会话账本明细。 */
+export interface SessionUsageDetail {
+  intervals: UsageInterval[];
+  events: UsageEvent[];
+}
+
+export interface UsageIntervalRecorded {
+  id: number;
+  sessionId: string;
+  providerId: string;
+  serverId: string;
+  role: 'publisher' | 'viewer';
+  actorId: string;
+  tier: string;
+  billingModel: 'interactive' | 'ultra_low_latency';
+  coefficient: number;
+  periodKey: string;
+  startedAt: number;
+  endedAt: number | null;
+  durationMs: number | null;
+  standardMs: number | null;
+  closedReason: string | null;
+}
+
+// 前端使用的字段名与后端一致（下划线列已在服务端映射为驼峰）
+export type UsageInterval = UsageIntervalRecorded;
+
+export interface UsageEventRecorded {
+  id: number;
+  sessionId: string;
+  providerId: string;
+  serverId: string;
+  role: 'publisher' | 'viewer';
+  actorId: string;
+  eventType: string;
+  occurredAt: number;
+  tier: string | null;
+  lowLatency: number;
+  detail: string;
+}
+
+export type UsageEvent = UsageEventRecorded;
+
 // ===== Agora Provider =====
 
 export type AgoraProviderOwnerType = 'platform' | 'space' | 'user';

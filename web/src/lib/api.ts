@@ -3,6 +3,8 @@ import type {
   AgoraTokenResponse,
   AgoraProvider,
   AgoraProviderFormInput,
+  UsageDashboard,
+  SessionUsageDetail,
 } from '../types';
 
 const SUPER_TOKEN_KEY = 'clsnbcast_super_token';
@@ -462,5 +464,18 @@ export const api = {
       spaceApiBase(platform, externalId) + '/providers/' + encodeURIComponent(id),
       { method: 'DELETE' },
     );
+  },
+
+  // ===== Usage Dashboard（超管）=====
+  getSuperUsage(period?: string): Promise<UsageDashboard> {
+    const qs = period ? `?period=${encodeURIComponent(period)}` : '';
+    return superRequest('/api/super/usage' + qs);
+  },
+  rebuildSuperUsage(period?: string): Promise<{ ok: boolean; period: string }> {
+    const qs = period ? `?period=${encodeURIComponent(period)}` : '';
+    return superRequest('/api/super/usage/rebuild' + qs, { method: 'POST' });
+  },
+  getSuperSessionUsage(sessionId: string): Promise<SessionUsageDetail> {
+    return superRequest('/api/super/usage/sessions/' + encodeURIComponent(sessionId));
   },
 };
