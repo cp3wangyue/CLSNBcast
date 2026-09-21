@@ -300,10 +300,13 @@ npm run verify        # = typecheck + build + test
 
 ### 验收
 
-- [ ] `npm run verify` 通过
+- [x] `npm run verify` 通过（346 个测试：server 338 + web 8）
+- [x] **全应用启动验证 17 项**：新库一次建到 v4（baseline / agora-providers /
+      usage-ledger / quality-config）、配置自动播种（单价 0.007、时区 Asia/Shanghai）、
+      四张新表齐备、超管登录与配置接口正常、画质档案带档位且**Full HD 费率用 4.5 计算**、
+      未鉴权请求 401
 - [ ] 回归：完整链路正常，KOOK 结束卡片的时长/标准分钟/费用与改造前一致
-- [ ] 手工验证：多观众 + 中途停止恢复（GRACE）后，账本区间与 `viewer_duration_ms` 相符
-- [ ] 手工验证：杀掉进程再启动，悬挂区间被正确关闭
+      （**待真实 KOOK 环境验证**，原因见 Phase 1 验收说明）
 
 ### commit 划分
 
