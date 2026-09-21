@@ -7,7 +7,7 @@ import { getDefaultQualityBitrates, QualityBitrateConfig } from '../session/sess
 import { runMigrations } from './migration-runner';
 import { MIGRATIONS } from './migrations';
 import { parseTriggerWords, setGlobalConfig } from './migrations/helpers';
-import type { QualityPreset } from '../quality/quality-preset.types';
+import type { QualityPreset, QualitySnapshot } from '../quality/quality-preset.types';
 
 // ===== Types =====
 
@@ -141,6 +141,16 @@ export interface ServerSession {
   providerId: string;
   /** 创建时的 App ID 快照。签发 Token 前会与 Provider 当前 App ID 比对，不一致就拒绝。 */
   agoraAppId: string;
+  /**
+   * 画质快照（Phase 3）。
+   *
+   * 声明为**可选**：对应列可空且有默认值，绝大多数调用点（含测试）不关心它们，
+   * 强制必填只会让每次建会话都要补四个无关字段。读取时 `mapSessionRow` 总会给出具体值。
+   */
+  qualityPresetId?: string | null;   // 预设 id；自定义画质为 null
+  qualityConfig?: string;            // 快照 JSON；旧会话为空串
+  optimizationMode?: string;
+  codec?: string;
 }
 
 // ===== Agora Provider =====
@@ -526,6 +536,11 @@ export class DatabaseService implements OnModuleDestroy {
       // 旧记录（迁移 002 之前）没有这两列，回退为空串表示「未绑定 Provider」
       providerId: row.provider_id ?? '',
       agoraAppId: row.agora_app_id ?? '',
+      // 画质快照（Phase 3）；旧会话没有这几列，回退为空值
+      qualityPresetId: row.quality_preset_id ?? null,
+      qualityConfig: row.quality_config ?? '',
+      optimizationMode: row.optimization_mode ?? '',
+      codec: row.codec ?? '',
     };
   }
 
@@ -991,6 +1006,27 @@ export class DatabaseService implements OnModuleDestroy {
       .run(providerId, agoraAppId, serverId).changes;
   }
 
+  /**
+   * 会话的画质快照（Phase 3）。
+   *
+   * 不存在（旧会话）时返回 null，调用方回退到 preset key 反查。
+   */
+  getQualitySnapshot(sessionId: string): { snapshot: QualitySnapshot; presetId: string | null } | null {
+    const row = this.db
+      .prepare('SELECT quality_config, quality_preset_id FROM sessions WHERE id = ?')
+      .get(sessionId) as any;
+    if (!row || !row.quality_config) return null;
+    try {
+      return {
+        snapshot: JSON.parse(row.quality_config) as QualitySnapshot,
+        presetId: row.quality_preset_id ?? null,
+      };
+    } catch {
+      this.logger.warn(`Invalid quality_config JSON for session ${sessionId}`);
+      return null;
+    }
+  }
+
   private readonly ALLOWED_SESSION_COLS = new Set([
     'token', 'channel', 'server_id', 'sharer_user_id', 'sharer_username',
     'guild_id', 'target_channel_id', 'status', 'viewer_count', 'peak_viewers',
@@ -998,6 +1034,8 @@ export class DatabaseService implements OnModuleDestroy {
     'created_at', 'started_at', 'ended_at', 'duration_ms', 'last_heartbeat',
     'grace_started_at', 'grace_reason', 'last_viewer_at', 'publisher_client_id',
     'low_latency',
+    // 画质快照（Phase 3）：由 SessionService.applyQuality() 一次性写入
+    'quality_preset_id', 'quality_config', 'optimization_mode', 'codec',
   ]);
 
   updateSession(id: string, fields: Partial<ServerSession>): void {

@@ -10,6 +10,7 @@ import { AgoraService } from '../agora/agora.service';
 import { EventBusService } from '../events/events.service';
 import { UsageLedgerService } from '../usage/usage-ledger.service';
 import { QualityConfigService } from '../quality/quality-config.service';
+import { QualityPresetService } from '../quality/quality-preset.service';
 import { SessionService } from './session.service';
 import { ShareSession } from './session.types';
 
@@ -31,6 +32,7 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
   let providers: AgoraProviderService;
   let ledger: UsageLedgerService;
   let qualityConfig: QualityConfigService;
+  let presets: QualityPresetService;
   let sessions: SessionService;
 
   function seedServer() {
@@ -84,7 +86,9 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
     qualityConfig = new QualityConfigService(db);
     qualityConfig.onModuleInit();
     ledger = new UsageLedgerService(db, qualityConfig);
-    sessions = new SessionService(db, agora, providers, bus, ledger, qualityConfig);
+    presets = new QualityPresetService(db, qualityConfig);
+    presets.onModuleInit();
+    sessions = new SessionService(db, agora, providers, bus, ledger, qualityConfig, presets);
 
     seedServer();
   });
@@ -348,6 +352,82 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
   });
 
   // ===== 计费展示切换到账本（2-3）=====
+
+  // ===== 画质快照（3-2）=====
+
+  describe('applyQuality', () => {
+    it('预设 → 写入快照，并带上档位', () => {
+      const session = createPendingSession();
+      sessions.applyQuality(session.id, { presetId: '1080p_2' });
+
+      const snapshot = sessions.getQualitySnapshot(session.id)!;
+      expect(snapshot.source).toBe('preset');
+      expect(snapshot.presetId).toBe('1080p_2');
+      expect(snapshot.width).toBe(1920);
+      expect(snapshot.tier).toBe('Full HD 全高清');
+
+      const row = db.getSessionById(session.id)!;
+      expect(row.qualityPresetId).toBe('1080p_2');
+      expect(row.optimizationMode).toBe('motion');
+      expect(row.codec).toBe('h264');
+    });
+
+    it('自定义 → 写入快照，档位由分辨率推导', () => {
+      const session = createPendingSession();
+      const { snapshot } = presets.resolveFromCustom({
+        width: 1600, height: 900, frameRate: 45, bitrateMin: 1500, codec: 'vp9',
+      });
+
+      sessions.applyQuality(session.id, { snapshot });
+
+      const stored = sessions.getQualitySnapshot(session.id)!;
+      expect(stored.source).toBe('custom');
+      expect(stored.presetId).toBeNull();
+      expect(stored.tier).toBe('Full HD 全高清');
+      expect(stored.codec).toBe('vp9');
+      expect(db.getSessionById(session.id)!.codec).toBe('vp9');
+    });
+
+    it('🔒 只能写入一次（画质参数在共享期间不可被覆盖）', () => {
+      const session = createPendingSession();
+      sessions.applyQuality(session.id, { presetId: '720p30' });
+      sessions.applyQuality(session.id, { presetId: '4k30' });
+
+      expect(sessions.getQualitySnapshot(session.id)!.presetId).toBe('720p30');
+    });
+
+    it('未知预设不写入快照，并记 error（不静默按默认档计费）', () => {
+      const session = createPendingSession();
+      const errorSpy = vi.spyOn(Logger.prototype, 'error');
+
+      sessions.applyQuality(session.id, { presetId: 'not-a-real-key' });
+
+      expect(sessions.getQualitySnapshot(session.id)).toBeNull();
+      expect(errorSpy.mock.calls.some((c) => String(c[0]).includes('unknown quality preset'))).toBe(true);
+    });
+
+    it('没有预设 id 也没有快照时什么都不做', () => {
+      const session = createPendingSession();
+      sessions.applyQuality(session.id, {});
+      expect(sessions.getQualitySnapshot(session.id)).toBeNull();
+    });
+
+    it('🔑 会话档位改为优先读快照（自定义分辨率也能算对档位）', () => {
+      const session = createPendingSession();
+      const { snapshot } = presets.resolveFromCustom({ width: 1024, height: 768, frameRate: 30 });
+      sessions.applyQuality(session.id, { snapshot });
+
+      // 区间档位应取快照的 HD，而不是 preset key 的 Full HD
+      const started = Date.now() - 60_000;
+      db.updateSession(session.id, { startedAt: started });
+      sessions.startSharing(session.token, 'client-1', false);
+      sessions.viewerConnected(session.id, 'v1');
+
+      const interval = ledger.listSessionIntervals(session.id)
+        .find((i) => i.role === 'viewer')!;
+      expect(interval.tier).toBe('HD 高清');
+    });
+  });
 
   describe('计费展示改由账本派生', () => {
     /** 造一段指定时长的观众观看区间（用显式时间戳，不依赖测试真实耗时）。 */

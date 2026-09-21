@@ -352,8 +352,18 @@ npm run verify        # = typecheck + build + test
   - [x] **启动验证 12 项**：一次建到 v5、播种 7 档、会话快照列齐备、
         DI 解析预设与自定义快照、未知 id 返回 undefined（不静默回退）、
         奇数宽高被拒、4K@60 允许但告警
-- [ ] **3-2 自定义模式**：分享页自定义表单 + `/api/share/start` 接受自定义参数
-- [ ] **3-3 预设管理 UI**：超管画质预设增删改停用排序
+- [x] **3-2 自定义模式（服务端）**
+  - [x] `/api/share/start` 接受 `customQuality`（width/height/frameRate/bitrateMin/
+        bitrateMax/optimizationMode/codec），**不要求出现在预设白名单里**（那正是自由画质的意义）
+  - [x] 结构性错误 → 400 `QUALITY_INVALID`（带 issues 列表）；
+        超出建议范围 → **接受并回传 warnings**，不修改用户输入
+  - [x] `SessionService.applyQuality()` 写入会话快照（`quality_config` 等列），
+        🔒 **只能写一次**
+  - [x] 未知预设 id 不写入并记 error（不静默按默认档计费）
+  - [x] 响应回传生效的 `quality` 快照与 `warnings`，供前端展示目标参数与风险提示
+  - [x] 🔑 会话档位改为**优先读快照**，自定义分辨率因此也能算对档位
+  - [x] 单测 6 个 + 全量回归（421 server + 8 web）
+- [ ] **3-3 前端**：分享页自定义表单 + 画质预设管理 UI
 - [ ] **3-4 运行中动态切换**：`setEncoderConfiguration` 切换分辨率 / 帧率 / 码率
       （`optimizationMode` 与 `codec` 是 track/client 级参数，**不支持**运行中切换）
 - [ ] **3-5 统计面板**：`getStats()` + `network-quality`，目标 vs 实际对比

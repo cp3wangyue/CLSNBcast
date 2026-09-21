@@ -4,6 +4,8 @@ import { randomBytes, randomUUID } from 'crypto';
 import { DatabaseService, ServerSession, UsageIntervalClosedReason } from '../database/database.service';
 import { AgoraService } from '../agora/agora.service';
 import { AgoraProviderService } from '../agora/agora-provider.service';
+import { QualityPresetService } from '../quality/quality-preset.service';
+import { QualityIssue, QualitySnapshot } from '../quality/quality-preset.types';
 import { UsageLedgerService } from '../usage/usage-ledger.service';
 import { QualityConfigService } from '../quality/quality-config.service';
 import { EventBusService } from '../events/events.service';
@@ -50,6 +52,7 @@ export class SessionService implements OnModuleInit {
     private readonly bus: EventBusService,
     private readonly ledger: UsageLedgerService,
     private readonly qualityConfig: QualityConfigService,
+    private readonly qualityPresets: QualityPresetService,
   ) {}
 
   async onModuleInit() {
@@ -525,14 +528,73 @@ export class SessionService implements OnModuleInit {
     }
   }
 
-  /**
-   * 会话当前档位。
-   *
-   * Phase 3 会把编码参数快照写进会话，届时改为「优先读快照，回退 preset 反查」，
-   * 这样自定义分辨率也能得到正确档位。
-   */
+  /** 会话当前档位。 */
   private resolveTier(session: ShareSession): string {
+    const snapshot = this.readQualitySnapshot(session.id);
+    if (snapshot) return snapshot.tier;
+    // 无快照（旧会话）：仍由 preset key 反查，Phase 3 之后新会话都会有快照
     return getQualityInfo(session.quality).tier;
+  }
+
+  /**
+   * 写入会话的画质快照。
+   *
+   * 🔒 **只能调用一次**：共享开始后画质参数的更改变更走 `updateQualityLive()`，
+   * 那会同时切分账本区间；这里不碰账本，因为此时区间还没开。
+   */
+  applyQuality(
+    sessionId: string,
+    input: {
+      presetId?: string | null;
+      snapshot?: QualitySnapshot;
+      /** 仅提示性的风险提示，不入账本 */
+      warnings?: QualityIssue[];
+    },
+  ): void {
+    const session = this.getById(sessionId);
+    if (!session) return;
+
+    let snapshot = input.snapshot;
+    if (!snapshot && input.presetId) {
+      const resolved = this.qualityPresets.resolveFromPreset(input.presetId);
+      if (!resolved) {
+        // 预设被删/改名属于配置错误，宁可暴露也不要静默按默认档计费
+        this.logger.error(`applyQuality: unknown quality preset "${input.presetId}"`);
+        return;
+      }
+      snapshot = resolved;
+    }
+    if (!snapshot) return;
+
+    if (this.readQualitySnapshot(sessionId)) {
+      this.logger.warn(`applyQuality ignored: session ${sessionId} already has a quality snapshot`);
+      return;
+    }
+
+    this.writeQualitySnapshot(sessionId, snapshot);
+    this.logger.log(
+      `applyQuality: session=${sessionId} source=${snapshot.source} ` +
+        `${snapshot.width}x${snapshot.height}@${snapshot.frameRate} tier=${snapshot.tier}`,
+    );
+  }
+
+  /** 读取会话的画质快照（不存在返回 null）。 */
+  getQualitySnapshot(sessionId: string): QualitySnapshot | null {
+    return this.readQualitySnapshot(sessionId);
+  }
+
+  private readQualitySnapshot(sessionId: string): QualitySnapshot | null {
+    const row = this.db.getQualitySnapshot(sessionId);
+    return row ? row.snapshot : null;
+  }
+
+  private writeQualitySnapshot(sessionId: string, snapshot: QualitySnapshot): void {
+    this.db.updateSession(sessionId, {
+      qualityPresetId: snapshot.presetId,
+      qualityConfig: JSON.stringify(snapshot),
+      optimizationMode: snapshot.optimizationMode,
+      codec: snapshot.codec,
+    });
   }
 
   private openViewerInterval(session: ShareSession, viewerId: string, at: number): void {
