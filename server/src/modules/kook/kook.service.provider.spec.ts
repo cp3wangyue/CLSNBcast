@@ -9,6 +9,7 @@ import { AgoraProviderService } from '../agora/agora-provider.service';
 import { AgoraService } from '../agora/agora.service';
 import { EventBusService } from '../events/events.service';
 import { SessionService } from '../session/session.service';
+import { UsageLedgerService } from '../usage/usage-ledger.service';
 import { KookService } from './kook.service';
 import { KookMessageEvent } from './kook-event.types';
 
@@ -77,7 +78,8 @@ describe('KookService × Agora Provider', () => {
     providers = new AgoraProviderService(db, new SecretCryptoService());
     const agora = new AgoraService(db, providers);
     const bus = new EventBusService();
-    sessions = new SessionService(db, agora, providers, bus);
+    const ledger = new UsageLedgerService(db);
+    sessions = new SessionService(db, agora, providers, bus, ledger);
     kook = new KookService(sessions, db, bus);
     // Registers bus listeners; without a KOOK bot token `this.bot` stays null.
     await kook.onModuleInit();

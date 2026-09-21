@@ -93,6 +93,7 @@ describe('UsageLedgerService', () => {
     vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    vi.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
 
     dir = mkdtempSync(join(tmpdir(), 'clsnbcast-ledger-'));
     process.env.DATA_DIR = dir;
@@ -141,11 +142,30 @@ describe('UsageLedgerService', () => {
       expect(interval.coefficient).toBe(9);
     });
 
-    it('🔒 同一参与者重复开启被拒绝（否则会重复计费）', () => {
-      expect(openViewer('viewer-1', 10_000)).toBeDefined();
-      expect(openViewer('viewer-1', 20_000)).toBeUndefined();
+    it('🔒 同一参与者重复开启是幂等的（复用原区间，不会重复计费）', () => {
+      const first = openViewer('viewer-1', 10_000);
+      const second = openViewer('viewer-1', 20_000);
 
+      expect(second).toBe(first);
       expect(ledger.listSessionIntervals(SESSION_ID)).toHaveLength(1);
+      // 起点保持第一次的值，不会因为「恢复」而被推迟
+      expect(ledger.listSessionIntervals(SESSION_ID)[0].startedAt).toBe(10_000);
+    });
+
+    it('关闭之后可以重新开启（GRACE 恢复场景）', () => {
+      openViewer('viewer-1', 10_000);
+      ledger.closeInterval({
+        sessionId: SESSION_ID, role: 'viewer', actorId: 'viewer-1',
+        endedAt: 30_000, reason: 'grace',
+      });
+
+      const reopened = openViewer('viewer-1', 40_000);
+
+      const intervals = ledger.listSessionIntervals(SESSION_ID);
+      expect(intervals).toHaveLength(2);
+      expect(reopened).not.toBe(intervals[0].id);
+      expect(intervals[1].startedAt).toBe(40_000);
+      expect(intervals[1].endedAt).toBeNull();
     });
 
     it('不同参与者可以各自开启', () => {

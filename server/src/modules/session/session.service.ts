@@ -1,9 +1,10 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { randomBytes, randomUUID } from 'crypto';
-import { DatabaseService, ServerSession } from '../database/database.service';
+import { DatabaseService, ServerSession, UsageIntervalClosedReason } from '../database/database.service';
 import { AgoraService } from '../agora/agora.service';
 import { AgoraProviderService } from '../agora/agora-provider.service';
+import { UsageLedgerService } from '../usage/usage-ledger.service';
 import { EventBusService } from '../events/events.service';
 import { SessionStatus, ShareSession, SessionInfo, getQualityInfo, getAudioCoefficient, getVideoCoefficient, STANDARD_MINUTE_PRICE } from './session.types';
 
@@ -47,6 +48,7 @@ export class SessionService implements OnModuleInit {
     private readonly agora: AgoraService,
     private readonly providers: AgoraProviderService,
     private readonly bus: EventBusService,
+    private readonly ledger: UsageLedgerService,
   ) {}
 
   async onModuleInit() {
@@ -263,6 +265,10 @@ export class SessionService implements OnModuleInit {
       session.startedAt = Date.now();
     }
     this.resumeViewerBilling(session.id, session.lastHeartbeat);
+    // 账本：主播区间从首次开始共享一直开到会话结束；观众区间在恢复时重新开启。
+    // 两者都是幂等的，因此「GRACE 恢复」重复调用不会切出多余区间。
+    this.ensurePublisherInterval(session, session.startedAt);
+    this.openAllViewerIntervals(session, session.lastHeartbeat);
 
     const dbRow = this.db.getSessionByToken(token);
     if (dbRow) {
@@ -317,6 +323,8 @@ export class SessionService implements OnModuleInit {
       session.graceStartedAt = null;
       session.graceReason = null;
       this.resumeViewerBilling(session.id, session.lastHeartbeat);
+      // 账本：回到 ACTIVE，观众重新进入计费状态
+      this.openAllViewerIntervals(session, session.lastHeartbeat);
       this.logger.log('session ' + session.id + ' reconnected within grace');
     }
 
@@ -340,6 +348,8 @@ export class SessionService implements OnModuleInit {
     if (!session || session.status === SessionStatus.ENDED) return undefined;
     const now = Date.now();
     this.pauseViewerBilling(session.id, now);
+    // 账本：观众停止计费；**主播区间保持开着**，因为主播时长口径含 GRACE 空档
+    this.closeAllViewerIntervals(session.id, now, 'grace');
     session.status = SessionStatus.GRACE;
     session.graceReason = 'stopped';
     session.graceStartedAt = now;
@@ -391,6 +401,11 @@ export class SessionService implements OnModuleInit {
       });
       isNewViewer = true;
     }
+    const presence = viewers.get(viewerId)!;
+    if (presence.billingStartedAt !== null) {
+      // 账本：观众进入计费状态
+      this.openViewerInterval(session, viewerId, now);
+    }
     this.syncViewerMetrics(session, viewers.size, isNewViewer ? viewerId : undefined);
   }
 
@@ -401,7 +416,10 @@ export class SessionService implements OnModuleInit {
     if (!viewers || !presence) return;
     presence.connections -= 1;
     if (presence.connections <= 0) {
-      this.accrueViewerDuration(sessionId, presence, Date.now());
+      const now = Date.now();
+      this.accrueViewerDuration(sessionId, presence, now);
+      // 账本：观众离开，结算本次观看区间
+      this.closeViewerInterval(sessionId, viewerId, now, 'viewer_left');
       viewers.delete(viewerId);
     }
     if (viewers.size === 0) this.viewerPresenceMap.delete(sessionId);
@@ -483,6 +501,113 @@ export class SessionService implements OnModuleInit {
     }
   }
 
+  // ===== 用量账本（旁路写入）=====
+  //
+  // ⚠️ 只在**真实的计费状态转换**处写入：观众加入 / 离开、进入 / 退出 GRACE、会话结束。
+  // 刻意**不**挂在 pauseViewerBilling / resumeViewerBilling 内部 ——
+  // checkpointViewerDurations 每 10 秒就会 pause+resume 一次做落盘，
+  // 挂在那里会每 10 秒切出一个新区间，把账本变成噪声。
+
+  /**
+   * 账本是**旁路**：写入失败不应打断正在进行的共享，
+   * 但必须大声报告，而不是静默丢账。
+   */
+  private safeLedger(action: () => void): void {
+    try {
+      action();
+    } catch (error) {
+      this.logger.error(`usage ledger write failed: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * 会话当前档位。
+   *
+   * Phase 3 会把编码参数快照写进会话，届时改为「优先读快照，回退 preset 反查」，
+   * 这样自定义分辨率也能得到正确档位。
+   */
+  private resolveTier(session: ShareSession): string {
+    return getQualityInfo(session.quality).tier;
+  }
+
+  private openViewerInterval(session: ShareSession, viewerId: string, at: number): void {
+    this.safeLedger(() => this.ledger.openInterval({
+      sessionId: session.id,
+      providerId: session.providerId,
+      // guildId 在本项目里就是 server_id：createSession 用 params.serverId || params.guildId
+      serverId: session.guildId,
+      role: 'viewer',
+      actorId: viewerId,
+      tier: this.resolveTier(session),
+      lowLatency: session.lowLatency,
+      startedAt: at,
+    }));
+  }
+
+  private closeViewerInterval(
+    sessionId: string,
+    viewerId: string,
+    at: number,
+    reason: UsageIntervalClosedReason,
+  ): void {
+    this.safeLedger(() => this.ledger.closeInterval({
+      sessionId,
+      role: 'viewer',
+      actorId: viewerId,
+      endedAt: at,
+      reason,
+    }));
+  }
+
+  /** 关闭当前在线所有观众的计费区间（进入 GRACE / 会话结束）。 */
+  private closeAllViewerIntervals(
+    sessionId: string,
+    at: number,
+    reason: UsageIntervalClosedReason,
+  ): void {
+    const viewers = this.viewerPresenceMap.get(sessionId);
+    if (!viewers) return;
+    for (const viewerId of viewers.keys()) {
+      this.closeViewerInterval(sessionId, viewerId, at, reason);
+    }
+  }
+
+  /**
+   * 为当前在线所有观众开计费区间（回到 ACTIVE）。
+   *
+   * 只处理**确实处于计费状态**的观众，避免给「等待开始共享」期间加入的人计费。
+   * 已在计费中的会被账本幂等复用，因此重复调用是安全的。
+   */
+  private openAllViewerIntervals(session: ShareSession, at: number): void {
+    const viewers = this.viewerPresenceMap.get(session.id);
+    if (!viewers) return;
+    for (const [viewerId, presence] of viewers) {
+      if (presence.billingStartedAt !== null) {
+        this.openViewerInterval(session, viewerId, at);
+      }
+    }
+  }
+
+  /**
+   * 主播的计费区间：从第一次开始共享一直开到**会话结束**。
+   *
+   * 因此时长等于 `endedAt - startedAt`，与既有 `durationMs` 一致 ——
+   * **含 GRACE 空档**，这是刻意保持的现状（见 docs/open-questions.md 决策 3）。
+   * 幂等，因此「GRACE 恢复」再次调用不会切出新区间。
+   */
+  private ensurePublisherInterval(session: ShareSession, at: number): void {
+    this.safeLedger(() => this.ledger.openInterval({
+      sessionId: session.id,
+      providerId: session.providerId,
+      serverId: session.guildId,
+      role: 'publisher',
+      actorId: session.sharerUserId,
+      tier: this.resolveTier(session),
+      lowLatency: session.lowLatency,
+      startedAt: at,
+    }));
+  }
+
   private getViewerDurationMs(session: ShareSession, now = Date.now()): number | null {
     const stored = this.viewerDurationMsMap.get(session.id) ?? session.viewerDurationMs;
     if (stored === null) return null;
@@ -534,6 +659,9 @@ export class SessionService implements OnModuleInit {
     const endedAt = Date.now();
     const durationMs = session.startedAt ? endedAt - session.startedAt : null;
     this.pauseViewerBilling(sessionId, endedAt);
+    // 账本：一次性关闭该会话的全部区间（含主播区间），
+    // 因此即使某个观众区间因异常没被单独关掉，这里也会兜底收口。
+    this.safeLedger(() => this.ledger.closeSessionIntervals(sessionId, 'session_end', endedAt));
     const viewerDurationMs = this.getViewerDurationMs(session, endedAt);
 
     // 持久化峰值和累计加入数（从内存 Map 取，不再实时写 DB）
@@ -718,6 +846,8 @@ export class SessionService implements OnModuleInit {
         const elapsed = now - session.lastHeartbeat;
         if (elapsed > cfg.heartbeatIntervalSec * 1000 * 3) {
           this.pauseViewerBilling(session.id, now);
+          // 账本：心跳丢失进入 GRACE，观众停止计费（主播区间继续开着）
+          this.closeAllViewerIntervals(session.id, now, 'grace');
           this.db.updateSession(session.id, {
             status: SessionStatus.GRACE,
             graceReason: 'heartbeat',

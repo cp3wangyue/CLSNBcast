@@ -254,11 +254,21 @@ npm run verify        # = typecheck + build + test
   - [x] **端到端验证（真实 DI 容器 + 真实数据库）17 项**：新库建到 v3、**v2 存量库增量升级到 v3
         且业务数据无损**、账本服务可从 DI 解析、区间开关与去重、周期键落库、
         汇总产出 4.57 标准分钟并同步到 Provider 配额缓存
-- [ ] **2-2 埋点接入（纯旁路写入）**
-  - [ ] 按 [data-model-design.md](./data-model-design.md) 4.5 的表格接线
-  - [ ] 口径按已决策：**观众 ACTIVE-only；主播含 GRACE**（保持现状）
-  - [ ] 启动时崩溃恢复：关闭悬挂区间（`reason='crash_recovery'`）
-  - [ ] ⚠️ **此步不改任何计费展示**，只旁路写入，便于验证「不影响现有功能」
+- [x] **2-2 埋点接入（纯旁路写入）**
+  - [x] 按 [data-model-design.md](./data-model-design.md) 4.5 的表格接线，全部落在**真实的计费状态转换**处：
+        观众加入 / 离开、进入 GRACE / 恢复 ACTIVE、开始共享、会话结束
+  - [x] 口径按已决策：**观众 ACTIVE-only；主播含 GRACE**（保持现状）。
+        主播区间从首次开始共享一直开到会话结束，因此时长 = `endedAt - startedAt`
+  - [x] ⚠️ **刻意不挂在 `pauseViewerBilling` / `resumeViewerBilling` 内部** ——
+        `checkpointViewerDurations` 每 10 秒就会 pause+resume 一次做落盘，
+        挂在那里会每 10 秒切出一个新区间，把账本变成噪声。已加专门的回归测试锁定
+  - [x] 旁路保护：所有账本写入走 `safeLedger()`，失败只记 error，**不打断正在进行的共享**
+  - [x] 启动时崩溃恢复：由 `UsageLedgerService.onModuleInit` 关闭悬挂区间（`reason='crash_recovery'`）
+  - [x] ⚠️ **此步不改任何计费展示**，只旁路写入。已用 `viewer-duration-matches-legacy` 断言锁定：
+        账本派生的观众时长与既有 `sessions.viewer_duration_ms` **完全一致**
+  - [x] 单测 19 个 + **真实 DI 容器端到端 20 项**：PENDING 观众不计费、加入后开始计费、
+        GRACE 关观众不关主播、恢复不重复开主播区间、checkpoint 不切区间、
+        结束一次性收口、账本失败不打断会话
 - [ ] **2-3 计费展示切换到账本**
   - [ ] `viewer_duration_ms` 改为由 `usage_intervals` 的 viewer 区间求和写入
   - [ ] `toInfo()` 的系数与单价改读 `quality_config`（不再是硬编码常量）

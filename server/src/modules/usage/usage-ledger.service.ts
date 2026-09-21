@@ -101,21 +101,23 @@ export class UsageLedgerService implements OnModuleInit {
   // ===== 区间开关 =====
 
   /**
-   * 开启一个计费区间。
+   * 确保某参与者有一个进行中的计费区间；已有则直接复用，返回它的 id。
    *
-   * **幂等保护**：同一 (session, role, actor) 已有进行中的区间时直接返回 `undefined`
-   * 并告警。重复开启会导致重复计费，这个守卫比调用方的自觉更可靠。
+   * **幂等**，因为「恢复」本身就会重复调用：会话从 GRACE 回到 ACTIVE 时，
+   * 观众的计费区间会重新开启，而主播的区间从一开始就一直开着。
+   * 用「已有则复用」而不是「重复则报错」，是为了让调用方可以无脑重试，
+   * 同时从机制上杜绝重复计费 —— 这比要求每个调用点自己判断更可靠。
    */
-  openInterval(input: OpenIntervalInput): number | undefined {
+  openInterval(input: OpenIntervalInput): number {
     const startedAt = input.startedAt ?? Date.now();
 
     const existing = this.db.getOpenUsageInterval(input.sessionId, input.role, input.actorId);
     if (existing) {
-      this.logger.warn(
-        `openInterval ignored: ${input.role} ${input.actorId} already has an open interval ` +
-          `(session=${input.sessionId}, interval=${existing.id})`,
+      this.logger.debug(
+        `openInterval: reusing open interval ${existing.id} for ${input.role} ${input.actorId} ` +
+          `(session=${input.sessionId})`,
       );
-      return undefined;
+      return existing.id;
     }
 
     const profile = resolveBillingProfile({
