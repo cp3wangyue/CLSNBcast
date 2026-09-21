@@ -269,8 +269,9 @@ export class AgoraProviderService implements OnModuleInit {
    *
    * 幂等：同 `ownerId` 已存在 space Provider 就跳过，因此每次启动重复执行是安全的。
    *
-   * ⚠️ 本步**不清空** `servers.agora_app_certificate` —— 旧 Token 路径仍在读它。
-   * 清空发生在 Token 签发切到 Provider 之后（Phase 1-3）。
+   * 迁移完成后会**清空** `servers.agora_app_certificate`（秘密不得明文落盘）。
+   * 该列自 Phase 1-3 起已无任何消费者，且已从 `ALLOWED_SERVER_COLS` 移除，
+   * 因此不存在「清空后旧路径读不到证书」的风险。
    */
   private adoptLegacyServerCredentials(): void {
     const candidates = this.db.listServersWithPlaintextCredentials();

@@ -113,8 +113,13 @@ npm run verify        # = typecheck + build + test
   - [x] 幂等：同 ownerId 已有 space Provider 就跳过，重复启动安全
   - [x] 健壮性：单个服务器数据坏掉（App ID 含空白等）只记 error，不阻断其余迁移与启动；
         `guildName` 为空回退 serverId；越界 `tokenExpireSec` 夹取到 `[60, 86400]` 而不是抛错
-  - [x] ⚠️ 本步**不清空** `servers.agora_app_certificate` —— 旧 Token 路径仍在读它，
-        清空必须与 Token 签发切换同一 commit（见 1-3）
+  - [x] 迁移完成后**清空** `servers.agora_app_certificate`（秘密不得明文落盘）。
+        清空动作与 Token 签发切换在同一 commit，因此不存在「旧路径读不到证书」的窗口
+  - [x] 🔒 同时**关闭明文写入路径**：把 `agora_app_id` / `agora_app_certificate` /
+        `agora_token_expire_sec` 从 `ALLOWED_SERVER_COLS` 与两个更新 DTO 中移除。
+        否则 API 上仍存在一条把明文证书写回服务器记录的路径，而签发 Token 根本不会读它 ——
+        属于「合规上必须堵掉」的缺口。这三列降级为只读历史字段，
+        唯一写入者是存量迁移与 `clearServerCertificate()`（均走直接 SQL）
   - [x] 单测 11 个：迁移与加密落库、会话回填、三次启动仍只有一个 Provider、无密钥时告警跳过、
         多服务器各自迁移、坏数据隔离、空名兜底、过期时间夹取、日志不含明文
 - [x] **1-3 Token 签发改造（修复 App ID 漂移）**

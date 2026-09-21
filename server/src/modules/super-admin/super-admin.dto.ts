@@ -34,18 +34,9 @@ export class UpdateGlobalConfigDto {
 }
 
 export class UpdateServerDto {
-  @IsOptional()
-  @IsString()
-  agoraAppId?: string;
-
-  @IsOptional()
-  @IsString()
-  agoraAppCertificate?: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(60)
-  agoraTokenExpireSec?: number;
+  // Agora 凭证已改由 Provider 管理（/api/super/providers），
+  // 因此这里不再声明 agoraAppId / agoraAppCertificate / agoraTokenExpireSec：
+  // ValidationPipe 的 whitelist 会把请求里的这三个字段剥离，服务器记录不再是凭证载体。
 
   @IsOptional()
   @IsArray()

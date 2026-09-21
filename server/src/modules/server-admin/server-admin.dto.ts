@@ -15,18 +15,8 @@ export class ServerAdminLoginDto {
 }
 
 export class UpdateServerConfigDto {
-  @IsOptional()
-  @IsString()
-  agoraAppId?: string;
-
-  @IsOptional()
-  @IsString()
-  agoraAppCertificate?: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(60)
-  agoraTokenExpireSec?: number;
+  // Agora 凭证已改由 Provider 管理（.../providers），
+  // 因此这里不再声明 agoraAppId / agoraAppCertificate / agoraTokenExpireSec。
 
   @IsOptional()
   @IsArray()

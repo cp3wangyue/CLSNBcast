@@ -489,7 +489,10 @@ export class DatabaseService implements OnModuleDestroy {
   private readonly ALLOWED_SERVER_COLS = new Set([
     'owner_id', 'owner_username', 'guild_name', 'open_id',
     'password_hash', 'bound', 'status',
-    'agora_app_id', 'agora_app_certificate', 'agora_token_expire_sec',
+    // ⚠️ 刻意排除 agora_app_id / agora_app_certificate / agora_token_expire_sec：
+    // 凭证自 Phase 1 起归 `agora_providers` 所有，这三列降级为「只读的历史字段」，
+    // 唯一写入者是存量迁移与 clearServerCertificate()（都走直接 SQL）。
+    // 留在白名单里会形成一条**明文证书**的写入路径。
     'allowed_qualities', 'trigger_words',
     'idle_timeout_sec', 'heartbeat_interval_sec', 'no_viewer_timeout_sec',
     'public_domain', 'allow_low_latency',

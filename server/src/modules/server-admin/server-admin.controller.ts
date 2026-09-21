@@ -154,11 +154,9 @@ export class ServerAdminController {
     if (!server) return { ok: false, message: '服务器不存在' };
 
     const updates: any = {};
-    if (dto.agoraAppId !== undefined) updates.agoraAppId = dto.agoraAppId;
-    if (dto.agoraAppCertificate !== undefined && dto.agoraAppCertificate !== '******') {
-      updates.agoraAppCertificate = dto.agoraAppCertificate;
-    }
-    if (dto.agoraTokenExpireSec !== undefined) updates.agoraTokenExpireSec = dto.agoraTokenExpireSec;
+    // Agora 凭证自 Phase 1 起由 Provider 管理（见 .../providers）。
+    // 这里刻意不再接受 agoraAppId / agoraAppCertificate / agoraTokenExpireSec，
+    // 否则服务器记录上会留下一条明文证书写入路径。
     if (dto.allowedQualities !== undefined) {
       const validKeys = new Set(QUALITY_PRESETS.map(quality => quality.key));
       const allowed = [...new Set(dto.allowedQualities.filter(key => validKeys.has(key)))];

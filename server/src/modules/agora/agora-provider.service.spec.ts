@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -388,17 +389,40 @@ describe('AgoraProviderService', () => {
   // ===== 存量凭证迁移 =====
 
   describe('存量服务器凭证迁移（onModuleInit）', () => {
+    /**
+     * 直接把明文凭证写进 servers 表，模拟「由旧代码创建的库」。
+     *
+     * 不能再走 `db.updateServer()`：那三个 agora 列自 Phase 1 起已被移出
+     * `ALLOWED_SERVER_COLS`（否则会留下一条明文证书的写入路径），
+     * 只有存量迁移与 clearServerCertificate 走直接 SQL。
+     */
+    function writeLegacyCredentialColumns(
+      serverId: string,
+      appId: string,
+      cert: string,
+      tokenExpireSec = 3600,
+    ) {
+      const raw = new Database(join(dir, 'clsnbcast.db'));
+      try {
+        raw
+          .prepare(
+            `UPDATE servers
+             SET agora_app_id = ?, agora_app_certificate = ?, agora_token_expire_sec = ?
+             WHERE server_id = ?`,
+          )
+          .run(appId, cert, tokenExpireSec, serverId);
+      } finally {
+        raw.close();
+      }
+    }
+
     /** 造一个持有明文 Agora 凭证的「旧库服务器」。 */
     function seedLegacyServer(
       serverId: string,
       opts: { guildName?: string; tokenExpireSec?: number } = {},
     ) {
       db.createServer(serverId, opts.guildName ?? `服务器 ${serverId}`, 'owner-1', '服主');
-      db.updateServer(serverId, {
-        agoraAppId: APP_ID,
-        agoraAppCertificate: CERT,
-        ...(opts.tokenExpireSec !== undefined ? { agoraTokenExpireSec: opts.tokenExpireSec } : {}),
-      });
+      writeLegacyCredentialColumns(serverId, APP_ID, CERT, opts.tokenExpireSec ?? 3600);
     }
 
     it('把明文凭证迁成 owner_type=space 的 Provider，并加密存储', () => {
@@ -467,7 +491,7 @@ describe('AgoraProviderService', () => {
       service.onModuleInit();
 
       // 模拟「上次迁移成功、但清空明文这一步失败」
-      db.updateServer('guild-1', { agoraAppCertificate: CERT });
+      writeLegacyCredentialColumns('guild-1', APP_ID, CERT);
       service.onModuleInit();
 
       expect(db.getServer('guild-1')!.agoraAppCertificate).toBe('');
@@ -499,7 +523,7 @@ describe('AgoraProviderService', () => {
     it('只有一个服务器凭证坏掉时，其余仍完成迁移', () => {
       // 第一个服务器的 App ID 含空白 → 校验失败
       db.createServer('bad', '坏服务器', 'o', 'o');
-      db.updateServer('bad', { agoraAppId: 'has space', agoraAppCertificate: CERT });
+      writeLegacyCredentialColumns('bad', 'has space', CERT);
       seedLegacyServer('guild-2');
 
       const errorSpy = vi.spyOn(Logger.prototype, 'error');
