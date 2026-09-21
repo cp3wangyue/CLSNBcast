@@ -2,6 +2,7 @@ import { baseline } from './001-baseline';
 import { agoraProviders } from './002-agora-providers';
 import { usageLedger } from './003-usage-ledger';
 import { qualityConfig } from './004-quality-config';
+import { qualityPresets } from './005-quality-presets';
 import type { Migration } from './types';
 
 /**
@@ -13,4 +14,10 @@ import type { Migration } from './types';
  *
  * ⚠️ 已发布的迁移**不可修改、version 不可复用**。要改行为就新增一个。
  */
-export const MIGRATIONS: Migration[] = [baseline, agoraProviders, usageLedger, qualityConfig];
+export const MIGRATIONS: Migration[] = [
+  baseline,
+  agoraProviders,
+  usageLedger,
+  qualityConfig,
+  qualityPresets,
+];

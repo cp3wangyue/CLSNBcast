@@ -7,6 +7,7 @@ import { getDefaultQualityBitrates, QualityBitrateConfig } from '../session/sess
 import { runMigrations } from './migration-runner';
 import { MIGRATIONS } from './migrations';
 import { parseTriggerWords, setGlobalConfig } from './migrations/helpers';
+import type { QualityPreset } from '../quality/quality-preset.types';
 
 // ===== Types =====
 
@@ -1384,6 +1385,109 @@ export class DatabaseService implements OnModuleDestroy {
       record.limits,
       Date.now(),
     );
+  }
+
+  // ===== Quality Presets =====
+
+  getQualityPreset(id: string): QualityPreset | undefined {
+    const row = this.db.prepare('SELECT * FROM quality_presets WHERE id = ?').get(id) as any;
+    return row ? this.mapQualityPresetRow(row) : undefined;
+  }
+
+  /** 按 sort_order 升序，保证画质选择器顺序稳定。 */
+  listQualityPresets(): QualityPreset[] {
+    const rows = this.db
+      .prepare('SELECT * FROM quality_presets ORDER BY sort_order ASC, id ASC')
+      .all() as any[];
+    return rows.map((row) => this.mapQualityPresetRow(row));
+  }
+
+  createQualityPreset(input: Omit<QualityPreset, 'createdAt' | 'updatedAt'>): QualityPreset {
+    const now = Date.now();
+    this.db.prepare(`
+      INSERT INTO quality_presets (
+        id, label, width, height, frame_rate, bitrate_min, bitrate_max,
+        optimization_mode, codec, enabled, is_builtin, sort_order, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.label,
+      input.width,
+      input.height,
+      input.frameRate,
+      input.bitrateMin,
+      input.bitrateMax,
+      input.optimizationMode,
+      input.codec,
+      input.enabled ? 1 : 0,
+      input.isBuiltin ? 1 : 0,
+      input.sortOrder,
+      now,
+      now,
+    );
+    return this.getQualityPreset(input.id)!;
+  }
+
+  /** 可更新列。刻意不含 `id` —— 它被 `allowed_qualities` 与存量会话引用，写后不可改。 */
+  private readonly ALLOWED_PRESET_COLS = new Set([
+    'label', 'width', 'height', 'frame_rate', 'bitrate_min', 'bitrate_max',
+    'optimization_mode', 'codec', 'enabled', 'sort_order', 'updated_at',
+  ]);
+
+  updateQualityPreset(id: string, fields: Partial<QualityPreset>): void {
+    const sets: string[] = [];
+    const values: any[] = [];
+    for (const [key, val] of Object.entries(fields)) {
+      if (val === undefined) continue;
+      const col = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+      if (!this.ALLOWED_PRESET_COLS.has(col)) {
+        this.logger.warn(`updateQualityPreset: rejected unknown column "${col}"`);
+        continue;
+      }
+      sets.push(`${col} = ?`);
+      values.push(typeof val === 'boolean' ? (val ? 1 : 0) : val);
+    }
+    if (sets.length === 0) return;
+    sets.push('updated_at = ?');
+    values.push(Date.now());
+    values.push(id);
+    this.db.prepare(`UPDATE quality_presets SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  deleteQualityPreset(id: string): boolean {
+    return this.db.prepare('DELETE FROM quality_presets WHERE id = ?').run(id).changes > 0;
+  }
+
+  /** 有多少会话引用了该预设（删除前的安全检查）。 */
+  countSessionsByQualityPreset(presetId: string): number {
+    const row = this.db
+      .prepare('SELECT COUNT(*) AS c FROM sessions WHERE quality_preset_id = ?')
+      .get(presetId) as any;
+    return Number(row?.c ?? 0);
+  }
+
+  private mapQualityPresetRow(row: any): QualityPreset {
+    return {
+      id: row.id,
+      label: row.label,
+      width: row.width,
+      height: row.height,
+      frameRate: row.frame_rate,
+      bitrateMin: row.bitrate_min ?? null,
+      bitrateMax: row.bitrate_max ?? null,
+      optimizationMode: row.optimization_mode ?? 'motion',
+      codec: row.codec ?? 'h264',
+      enabled: !!row.enabled,
+      isBuiltin: !!row.is_builtin,
+      sortOrder: row.sort_order ?? 0,
+      createdAt: row.created_at ?? 0,
+      updatedAt: row.updated_at ?? 0,
+    };
+  }
+
+  /** 事务包装器。供需要「多条语句要么全成功」的服务使用（例如播种预设）。 */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
   }
 
   // ===== KOOK Webhook Inbox =====

@@ -335,32 +335,28 @@ npm run verify        # = typecheck + build + test
 
 ### 任务
 
-- [ ] **3-1 预设与配置表化**
-  - [ ] migration：`quality_presets`（播种现有 7 档，`id` 沿用现有 key）+ `quality_config`
-  - [ ] `QUALITY_PRESETS` 常量退化为种子数据
-  - [ ] 管理端 CRUD（预设 + 档位规则 + 系数 + 单价 + 参数边界）
-  - [ ] `getQualityInfo` 改为读表 + 内存缓存
-- [ ] **3-2 自定义模式**
-  - [ ] `sessions` 加 `quality_preset_id` / `quality_config` / `optimization_mode` / `codec`（**五处联动**）
-  - [ ] `QualityValidationService`：拒绝规则 + 警告规则（[data-model-design.md](./data-model-design.md) 2.5）
-  - [ ] 抽出共享校验器，让全局码率 / 服务器白名单 / 会话自定义三处复用
-  - [ ] `/api/share/start` 接受自定义参数
-  - [ ] 单测：全部拒绝规则 + 全部警告规则
-- [ ] **3-3 前端自定义表单**
-  - [ ] `QUALITY_OPTIONS` 改为从 API 拉取（消除两处硬编码副本）
-  - [ ] 「自定义」模式表单：width / height / frameRate / bitrateMin / bitrateMax / optimizationMode / codec
-  - [ ] 前端镜像同一套校验；**超出 Agora 建议范围只显示风险提示，不强制修改输入**
-  - [ ] 后端返回的 warning 列表展示在表单上
-- [ ] **3-4 运行中动态切换**
-  - [ ] 新增会话内改档位接口（服务端校验 + 更新快照）
-  - [ ] `ILocalVideoTrack.setEncoderConfiguration` 接线
-  - [ ] 账本区间切分（关旧区间 `tier_change` + 开新区间）
-  - [ ] 明确 UI 限制：`optimizationMode` 与 `codec` **开始共享后不可改**（置灰 + 说明原因）
-- [ ] **3-5 统计面板**
-  - [ ] `ILocalVideoTrack.getStats()` 轮询（`sendFrameRate` / `sendResolutionWidth` / `sendBytes` / `sendRttMs` / `sendJitterMs` / `sendPacketsLost`）
-  - [ ] `client.on('network-quality')`（每 2s，uplink/downlink 0-6）
-  - [ ] 展示：目标参数 vs 实际发送（目标码率 / 实际码率 / 分辨率 / FPS / 网络状况）
-  - [ ] 容忍字段缺失（`sendFrameRate` 在 Firefox 不可得，`captureFrameRate` 在 Safari/Firefox 不可得）
+- [x] **3-1 预设与配置表化**（地基部分）
+  - [x] migration `005-quality-presets`：建 `quality_presets` 表（只建表不播种，
+        默认值唯一定义在 `DEFAULT_QUALITY_PRESETS`）+ 给 `sessions` 加
+        `quality_preset_id` / `quality_config` / `optimization_mode` / `codec`
+  - [x] ✅ 播种内容与原硬编码 `QUALITY_PRESETS` **逐项一致**（7 档、id 全部沿用），
+        因此现有画质选择行为完全不变
+  - [x] `QualityPresetService`：播种、CRUD、启用/停用、排序、删除保护
+  - [x] `validateCustomQuality()`：校验分**两档** —— 结构性错误 `reject`（400），
+        超出声网建议范围 `warn`（**只提示，不修改用户输入**）
+  - [x] 🔑 快照的 `tier` **由分辨率推导**（`quality_config` 档位规则），
+        不写死在预设上 —— 自定义分辨率因此也能算对钱
+  - [x] 🔒 预设 `id` 不可改、内置不可删、被会话引用不可删（要停用请用 `enabled=false`）
+  - [x] 单测 62 个：播种一致性、快照解析、档位推导、跟随配置变更、CRUD、
+        16 项 reject 用例、3 项 warn 不拦截、删除保护
+  - [x] **启动验证 12 项**：一次建到 v5、播种 7 档、会话快照列齐备、
+        DI 解析预设与自定义快照、未知 id 返回 undefined（不静默回退）、
+        奇数宽高被拒、4K@60 允许但告警
+- [ ] **3-2 自定义模式**：分享页自定义表单 + `/api/share/start` 接受自定义参数
+- [ ] **3-3 预设管理 UI**：超管画质预设增删改停用排序
+- [ ] **3-4 运行中动态切换**：`setEncoderConfiguration` 切换分辨率 / 帧率 / 码率
+      （`optimizationMode` 与 `codec` 是 track/client 级参数，**不支持**运行中切换）
+- [ ] **3-5 统计面板**：`getStats()` + `network-quality`，目标 vs 实际对比
   - [ ] ⚠️ 注意：本项目 preset key 与 Agora 内置 preset 名**部分同名但语义不同**（详见 [architecture-analysis.md](./architecture-analysis.md) 第 2 节 SDK 核实）。**绝不能把本项目的 quality key 直接当 `VideoEncoderConfigurationPreset` 字符串传给 SDK**，必须在类型层面隔离
 
 ### 验收
