@@ -147,8 +147,8 @@ export interface ServerSession {
    * 声明为**可选**：对应列可空且有默认值，绝大多数调用点（含测试）不关心它们，
    * 强制必填只会让每次建会话都要补四个无关字段。读取时 `mapSessionRow` 总会给出具体值。
    */
-  qualityPresetId?: string | null;   // 预设 id；自定义画质为 null
-  qualityConfig?: string;            // 快照 JSON；旧会话为空串
+  qualityPresetId?: string | null; // 预设 id；自定义画质为 null
+  qualityConfig?: string; // 快照 JSON；旧会话为空串
   optimizationMode?: string;
   codec?: string;
 }
@@ -445,6 +445,12 @@ export class DatabaseService implements OnModuleDestroy {
       this.logger.warn('Invalid qualityBitrates global config; using defaults');
       return getDefaultQualityBitrates();
     }
+  }
+
+  /** 读取单个 global_config 值（原样返回，不解密 —— 解密在 SecretCryptoService）。 */
+  getGlobalConfigValue(key: string): string {
+    const row = this.db.prepare('SELECT value FROM global_config WHERE key = ?').get(key) as any;
+    return row?.value ?? '';
   }
 
   setGlobalConfig(key: string, value: string): void {

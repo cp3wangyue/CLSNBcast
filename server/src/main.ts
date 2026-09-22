@@ -8,6 +8,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import { createHmac } from 'crypto';
+import { safeEqual } from './modules/auth/safe-compare';
 import * as bodyParser from 'body-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
@@ -171,7 +172,8 @@ async function bootstrap() {
     }
 
     const sig = createHmac('sha256', hmacKey).update(parts[0]).digest('base64url');
-    if (sig !== parts[1]) {
+    // 常量时间比较：`!==` 会在第一个不同字节处返回，理论上可被时序分析利用来逐字节猜签名。
+    if (!safeEqual(sig, parts[1])) {
       return res.status(401).json({ message: '登录已过期，请重新登录' });
     }
 

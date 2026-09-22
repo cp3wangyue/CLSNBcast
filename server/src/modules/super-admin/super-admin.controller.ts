@@ -17,6 +17,7 @@ import { createHmac } from 'crypto';
 import { AgoraProviderService } from '../agora/agora-provider.service';
 import { QualityConfigService } from '../quality/quality-config.service';
 import { QualityPresetService } from '../quality/quality-preset.service';
+import { SecretCryptoService } from '../crypto/secret-crypto.service';
 import { UsageLedgerService } from '../usage/usage-ledger.service';
 import {
   CreateAgoraProviderDto,
@@ -51,6 +52,7 @@ export class SuperAdminController {
     private readonly qualityConfig: QualityConfigService,
     private readonly usage: UsageLedgerService,
     private readonly presets: QualityPresetService,
+    private readonly crypto: SecretCryptoService,
   ) {
     const pwd = process.env.SUPER_ADMIN_PASSWORD!;
     this.superPasswordHash = bcrypt.hashSync(pwd, 10);
@@ -109,14 +111,15 @@ export class SuperAdminController {
 
   @Put('config')
   updateConfig(@Body() dto: UpdateGlobalConfigDto) {
+    // 掩码表示「不修改」。明文经加密后落库（没有主密钥时抛错，绝不静默存明文）。
     if (dto.kookBotToken !== undefined && dto.kookBotToken !== '******') {
-      this.db.setGlobalConfig('kookBotToken', dto.kookBotToken);
+      this.crypto.setGlobalSecret('kookBotToken', dto.kookBotToken);
     }
     if (dto.kookVerifyToken !== undefined && dto.kookVerifyToken !== '******') {
-      this.db.setGlobalConfig('kookVerifyToken', dto.kookVerifyToken);
+      this.crypto.setGlobalSecret('kookVerifyToken', dto.kookVerifyToken);
     }
     if (dto.kookEncryptKey !== undefined && dto.kookEncryptKey !== '******') {
-      this.db.setGlobalConfig('kookEncryptKey', dto.kookEncryptKey);
+      this.crypto.setGlobalSecret('kookEncryptKey', dto.kookEncryptKey);
     }
     if (dto.publicDomain !== undefined) {
       this.db.setGlobalConfig('publicDomain', dto.publicDomain);

@@ -170,6 +170,8 @@ export class AgoraProviderService implements OnModuleInit {
     // 启动门禁：库里已有密文、但主密钥缺失或不可用时，让进程直接失败退出。
     // 否则应用会带着「读不出凭证」的状态继续运行，问题被推迟到用户开始共享时才暴露。
     this.crypto.assertUsableForExistingSecrets(this.db.listProviderCiphertexts());
+    // 存量明文凭证（Phase 5 之前写入的 KOOK 秘密）在此加密；没有主密钥时安全跳过。
+    this.crypto.migrateLegacySecrets();
     this.adoptLegacyServerCredentials();
     // 启动时先探一次，让管理面板立刻有健康状态可看。
     // 离线检查是纯本地 HMAC 计算，不产生任何声网调用或计费。

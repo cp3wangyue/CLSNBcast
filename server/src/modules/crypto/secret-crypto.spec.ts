@@ -1,5 +1,9 @@
 import { Logger } from '@nestjs/common';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DatabaseService } from '../database/database.service';
 import {
   ENVELOPE_VERSION,
   MASTER_KEY_BYTES,
@@ -250,22 +254,26 @@ describe('looksEncrypted / hasAnyEncryptedValue', () => {
 
 describe('SecretCryptoService', () => {
   const originalEnv = process.env[SECRET_ENCRYPTION_KEY_ENV];
+  let dir: string;
+  let db: DatabaseService;
 
   beforeEach(() => {
-    vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-    vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    dir = mkdtempSync(join(tmpdir(), 'clsnbcast-crypto-'));
+    process.env.DATA_DIR = dir;
+    db = new DatabaseService();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    db.onModuleDestroy();
     if (originalEnv === undefined) delete process.env[SECRET_ENCRYPTION_KEY_ENV];
     else process.env[SECRET_ENCRYPTION_KEY_ENV] = originalEnv;
+    rmSync(dir, { recursive: true, force: true });
+    delete process.env.DATA_DIR;
   });
 
   it('未设置环境变量时 isConfigured=false，且加解密都抛错（绝不退化为明文）', () => {
     delete process.env[SECRET_ENCRYPTION_KEY_ENV];
-    const service = new SecretCryptoService();
+    const service = new SecretCryptoService(db);
 
     expect(service.isConfigured).toBe(false);
     try {
@@ -279,7 +287,7 @@ describe('SecretCryptoService', () => {
 
   it('设置合法密钥后可用，往返正确', () => {
     process.env[SECRET_ENCRYPTION_KEY_ENV] = HEX_KEY;
-    const service = new SecretCryptoService();
+    const service = new SecretCryptoService(db);
 
     expect(service.isConfigured).toBe(true);
     expect(service.decrypt(service.encrypt(PLAINTEXT))).toBe(PLAINTEXT);
@@ -287,21 +295,21 @@ describe('SecretCryptoService', () => {
 
   it('密钥格式非法时构造即抛错（启动阶段失败，而不是等到第一次加密）', () => {
     process.env[SECRET_ENCRYPTION_KEY_ENV] = 'too-short';
-    expect(() => new SecretCryptoService()).toThrow(/exactly 32 bytes/);
+    expect(() => new SecretCryptoService(db)).toThrow(/exactly 32 bytes/);
   });
 
   it('两个使用同一密钥的服务实例可以互相解密', () => {
     process.env[SECRET_ENCRYPTION_KEY_ENV] = HEX_KEY;
-    const a = new SecretCryptoService();
-    const b = new SecretCryptoService();
+    const a = new SecretCryptoService(db);
+    const b = new SecretCryptoService(db);
     expect(b.decrypt(a.encrypt(PLAINTEXT))).toBe(PLAINTEXT);
   });
 
   it('两个使用不同密钥的服务实例无法互相解密', () => {
     process.env[SECRET_ENCRYPTION_KEY_ENV] = HEX_KEY;
-    const a = new SecretCryptoService();
+    const a = new SecretCryptoService(db);
     process.env[SECRET_ENCRYPTION_KEY_ENV] = B64_KEY;
-    const b = new SecretCryptoService();
+    const b = new SecretCryptoService(db);
 
     expect(() => b.decrypt(a.encrypt(PLAINTEXT))).toThrow(/wrong key or corrupted/);
   });
@@ -309,14 +317,14 @@ describe('SecretCryptoService', () => {
   describe('assertUsableForExistingSecrets（启动门禁）', () => {
     it('无密钥 + 无密文 → 放行', () => {
       delete process.env[SECRET_ENCRYPTION_KEY_ENV];
-      const service = new SecretCryptoService();
+      const service = new SecretCryptoService(db);
       expect(() => service.assertUsableForExistingSecrets(['', null, 'plain-app-id'])).not.toThrow();
     });
 
     it('无密钥 + 库里有密文 → 抛错并记 error 日志', () => {
       const envelope = encryptSecret(KEY, PLAINTEXT);
       delete process.env[SECRET_ENCRYPTION_KEY_ENV];
-      const service = new SecretCryptoService();
+      const service = new SecretCryptoService(db);
       const errorSpy = vi.spyOn(Logger.prototype, 'error');
 
       expect(() => service.assertUsableForExistingSecrets(['plain', envelope])).toThrow(/FATAL/);
@@ -331,7 +339,7 @@ describe('SecretCryptoService', () => {
     it('有密钥 + 库里有密文 → 放行', () => {
       const envelope = encryptSecret(KEY, PLAINTEXT);
       process.env[SECRET_ENCRYPTION_KEY_ENV] = HEX_KEY;
-      const service = new SecretCryptoService();
+      const service = new SecretCryptoService(db);
       expect(() => service.assertUsableForExistingSecrets([envelope])).not.toThrow();
     });
   });
@@ -342,7 +350,7 @@ describe('SecretCryptoService', () => {
     const warnSpy = vi.spyOn(Logger.prototype, 'warn');
     const errorSpy = vi.spyOn(Logger.prototype, 'error');
 
-    const service = new SecretCryptoService();
+    const service = new SecretCryptoService(db);
     service.encrypt(PLAINTEXT);
     service.decrypt(service.encrypt(PLAINTEXT));
     service.assertUsableForExistingSecrets([service.encrypt(PLAINTEXT)]);

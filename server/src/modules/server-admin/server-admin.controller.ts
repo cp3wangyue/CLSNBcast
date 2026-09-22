@@ -16,6 +16,7 @@ import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
 import { QUALITY_PRESETS } from '../session/session.types';
 import { AgoraProviderService } from '../agora/agora-provider.service';
+import { SecretCryptoService } from '../crypto/secret-crypto.service';
 import {
   CreateSpaceProviderDto,
   UpdateSpaceProviderDto,
@@ -33,6 +34,7 @@ export class ServerAdminController {
   constructor(
     private readonly db: DatabaseService,
     private readonly providers: AgoraProviderService,
+    private readonly crypto: SecretCryptoService,
   ) {}
 
   private resolveSpace(params: Record<string, string>) {
@@ -116,7 +118,8 @@ export class ServerAdminController {
     };
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
     // 使用每服务器独立的 HMAC 密钥签名
-    const serverSecret = server.serverSecret || process.env.SUPER_ADMIN_PASSWORD!;
+      // 服务器签名密钥：库中加密存储，这里解密后只用于计算 HMAC；明文不写日志、不进响应
+      const serverSecret = this.crypto.decryptServerSecret(server.serverSecret) || process.env.SUPER_ADMIN_PASSWORD!;
     const sig = createHmac('sha256', serverSecret).update(body).digest('base64url');
     return { ok: true, token: body + '.' + sig };
   }

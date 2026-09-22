@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ProviderUnavailableError, SessionService } from '../session/session.service';
 import { ShareSession } from '../session/session.types';
 import { DatabaseService } from '../database/database.service';
+import { SecretCryptoService } from '../crypto/secret-crypto.service';
 import { EventBusService } from '../events/events.service';
 import { buildShareLinkCard, buildViewingCard, buildEndedShareCard, buildHelpCard, buildBindCard, buildAlreadyBoundCard, buildBindRequestCard } from './card-builder';
 import { KookApiClient } from './kook-api.client';
@@ -20,6 +21,7 @@ export class KookService implements OnModuleInit {
     private readonly sessionService: SessionService,
     private readonly db: DatabaseService,
     private readonly bus: EventBusService,
+    private readonly crypto: SecretCryptoService,
   ) {}
 
   async onModuleInit() {
@@ -30,7 +32,8 @@ export class KookService implements OnModuleInit {
 
   async startApiClient() {
     const globalCfg = this.db.getGlobalConfig();
-    const token = globalCfg.kookBotToken;
+    // Bot Token 在库中加密存储，明文只在本地变量里用于创建 API 客户端
+    const token = this.crypto.getGlobalSecret('kookBotToken');
     if (!token) {
       this.logger.warn('KOOK bot token not configured, set it in Super Admin panel');
       return;

@@ -41,7 +41,7 @@ describe('AgoraProviderService', () => {
     process.env.SECRET_ENCRYPTION_KEY = HEX_KEY;
 
     db = new DatabaseService();
-    crypto = new SecretCryptoService();
+    crypto = new SecretCryptoService(db);
     service = new AgoraProviderService(db, crypto);
   });
 
@@ -203,7 +203,7 @@ describe('AgoraProviderService', () => {
     it('主密钥不匹配时解密抛错（不会静默返回空串）', () => {
       const view = service.create(baseCreate());
       process.env.SECRET_ENCRYPTION_KEY = 'b'.repeat(64);
-      const otherService = new AgoraProviderService(db, new SecretCryptoService());
+      const otherService = new AgoraProviderService(db, new SecretCryptoService(db));
 
       expect(() => otherService.getWithSecrets(view.id)).toThrow(/wrong key or corrupted/);
     });
@@ -368,7 +368,7 @@ describe('AgoraProviderService', () => {
   describe('onModuleInit 启动门禁', () => {
     it('库里没有密文时，缺密钥也能启动', () => {
       delete process.env.SECRET_ENCRYPTION_KEY;
-      const noKeyService = new AgoraProviderService(db, new SecretCryptoService());
+      const noKeyService = new AgoraProviderService(db, new SecretCryptoService(db));
       expect(() => noKeyService.onModuleInit()).not.toThrow();
     });
 
@@ -376,7 +376,7 @@ describe('AgoraProviderService', () => {
       service.create(baseCreate());
       delete process.env.SECRET_ENCRYPTION_KEY;
 
-      const noKeyService = new AgoraProviderService(db, new SecretCryptoService());
+      const noKeyService = new AgoraProviderService(db, new SecretCryptoService(db));
       expect(() => noKeyService.onModuleInit()).toThrow(/FATAL/);
     });
 
@@ -502,7 +502,7 @@ describe('AgoraProviderService', () => {
     it('没有主密钥时跳过迁移并告警（而不是崩溃）', () => {
       seedLegacyServer('guild-1');
       delete process.env.SECRET_ENCRYPTION_KEY;
-      const noKeyService = new AgoraProviderService(db, new SecretCryptoService());
+      const noKeyService = new AgoraProviderService(db, new SecretCryptoService(db));
       const warnSpy = vi.spyOn(Logger.prototype, 'warn');
 
       expect(() => noKeyService.onModuleInit()).not.toThrow();
@@ -848,7 +848,7 @@ describe('AgoraProviderService', () => {
     it('主密钥不匹配（解密失败）时标记为 unhealthy', () => {
       const { id } = service.create(baseCreate());
       process.env.SECRET_ENCRYPTION_KEY = 'b'.repeat(64);
-      const other = new AgoraProviderService(db, new SecretCryptoService());
+      const other = new AgoraProviderService(db, new SecretCryptoService(db));
 
       expect(other.checkHealth(id).status).toBe('unhealthy');
     });

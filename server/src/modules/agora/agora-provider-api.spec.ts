@@ -25,6 +25,7 @@ describe('Agora Provider 管理端接口', () => {
   let providers: AgoraProviderService;
   let qualityConfig: QualityConfigService;
   let ledger: UsageLedgerService;
+  let secretCrypto: SecretCryptoService;
   let presets: QualityPresetService;
   let superAdmin: SuperAdminController;
   let spaceAdmin: ServerAdminController;
@@ -40,14 +41,15 @@ describe('Agora Provider 管理端接口', () => {
     process.env.SECRET_ENCRYPTION_KEY = HEX_KEY;
 
     db = new DatabaseService();
-    providers = new AgoraProviderService(db, new SecretCryptoService());
+    providers = new AgoraProviderService(db, new SecretCryptoService(db));
     qualityConfig = new QualityConfigService(db);
     qualityConfig.onModuleInit();
     ledger = new UsageLedgerService(db, qualityConfig);
     presets = new QualityPresetService(db, qualityConfig);
     presets.onModuleInit();
-    superAdmin = new SuperAdminController(db, providers, qualityConfig, ledger, presets);
-    spaceAdmin = new ServerAdminController(db, providers);
+    secretCrypto = new SecretCryptoService(db);
+    superAdmin = new SuperAdminController(db, providers, qualityConfig, ledger, presets, secretCrypto);
+    spaceAdmin = new ServerAdminController(db, providers, secretCrypto);
 
     db.createServer(SPACE_A, 'A 服务器', 'owner-a', '服主A');
     db.createServer(SPACE_B, 'B 服务器', 'owner-b', '服主B');

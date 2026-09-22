@@ -80,7 +80,7 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
     process.env.SECRET_ENCRYPTION_KEY = 'a'.repeat(64);
 
     db = new DatabaseService();
-    providers = new AgoraProviderService(db, new SecretCryptoService());
+    providers = new AgoraProviderService(db, new SecretCryptoService(db));
     const agora = new AgoraService(db, providers);
     const bus = new EventBusService();
     qualityConfig = new QualityConfigService(db);

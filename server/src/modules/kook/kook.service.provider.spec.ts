@@ -49,6 +49,7 @@ describe('KookService × Agora Provider', () => {
   let dir: string;
   let db: DatabaseService;
   let providers: AgoraProviderService;
+  let secretCrypto: SecretCryptoService;
   let sessions: SessionService;
   let kook: KookService;
 
@@ -77,7 +78,7 @@ describe('KookService × Agora Provider', () => {
     process.env.SECRET_ENCRYPTION_KEY = 'a'.repeat(64);
 
     db = new DatabaseService();
-    providers = new AgoraProviderService(db, new SecretCryptoService());
+    providers = new AgoraProviderService(db, new SecretCryptoService(db));
     const agora = new AgoraService(db, providers);
     const bus = new EventBusService();
     const qualityConfig = new QualityConfigService(db);
@@ -85,8 +86,9 @@ describe('KookService × Agora Provider', () => {
     const ledger = new UsageLedgerService(db, qualityConfig);
     const presets = new QualityPresetService(db, qualityConfig);
     presets.onModuleInit();
+    secretCrypto = new SecretCryptoService(db);
     sessions = new SessionService(db, agora, providers, bus, ledger, qualityConfig, presets);
-    kook = new KookService(sessions, db, bus);
+    kook = new KookService(sessions, db, bus, secretCrypto);
     // Registers bus listeners; without a KOOK bot token `this.bot` stays null.
     await kook.onModuleInit();
   });

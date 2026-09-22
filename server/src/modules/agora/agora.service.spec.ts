@@ -55,7 +55,7 @@ describe('AgoraService.generateToken', () => {
     process.env.SECRET_ENCRYPTION_KEY = HEX_KEY;
 
     db = new DatabaseService();
-    providers = new AgoraProviderService(db, new SecretCryptoService());
+    providers = new AgoraProviderService(db, new SecretCryptoService(db));
     service = new AgoraService(db, providers);
 
     providerId = providers.create({
