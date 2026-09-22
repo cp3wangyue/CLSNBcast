@@ -6,7 +6,10 @@ import type {
 } from 'agora-rtc-sdk-ng';
 import { api } from '../lib/api';
 import { installScreenAudioInterceptor } from '../lib/screenAudioCapture';
-import type { VideoEncoderConfiguration } from '../types';
+import type {
+  VideoEncoderConfiguration,
+  VideoSendStats,
+} from '../types';
 
 const AgoraRTC = (window as any).AgoraRTC;
 AgoraRTC.setLogLevel(2);
@@ -263,6 +266,42 @@ export function useScreenShare(token: string, onTrackEnded?: () => void) {
     [],
   );
 
+  /**
+   * 采样实际发送统计（默认每秒一次）。
+   *
+   * 只取我们展示需要的字段，并且全部按「可能缺失」处理：
+   * - `sendFrameRate` 在 Firefox 上不可得；
+   * - `captureFrameRate` 在 Safari / Firefox 上不可得。
+   * 缺字段时对应项为 null，而不是补 0 —— 补 0 会让"实际 0fps"和"拿不到"看起来一样。
+   */
+  const sampleStats = useCallback(async (): Promise<VideoSendStats | null> => {
+    const track = screenVideoRef.current;
+    const client = clientRef.current;
+    if (!track || !client) return null;
+    try {
+      const stats = track.getStats() as any;
+      return {
+        codecType: stats?.codecType ?? null,
+        sendFrameRate: stats?.sendFrameRate ?? null,
+        captureFrameRate: stats?.captureFrameRate ?? null,
+        sendResolutionWidth: stats?.sendResolutionWidth ?? null,
+        sendResolutionHeight: stats?.sendResolutionHeight ?? null,
+        sendBitrateKbps: stats?.sendBitrate ? Math.round(stats.sendBitrate / 1000) : null,
+        sendBytes: stats?.sendBytes ?? null,
+        sendRttMs: stats?.sendRttMs ?? null,
+        sendJitterMs: stats?.sendJitterMs ?? null,
+        sendPacketsLost: stats?.sendPacketsLost ?? null,
+        uplinkNetworkQuality: client.getRemoteNetworkQuality
+          ? (client as any).uplinkNetworkQuality ?? null
+          : null,
+        sampledAt: Date.now(),
+      };
+    } catch {
+      // 采样失败不应影响共享本身
+      return null;
+    }
+  }, []);
+
   return {
     isSharing,
     error,
@@ -270,5 +309,6 @@ export function useScreenShare(token: string, onTrackEnded?: () => void) {
     stop,
     setLocalPreviewContainer,
     setEncoderConfig,
+    sampleStats,
   };
 }

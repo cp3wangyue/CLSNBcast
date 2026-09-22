@@ -14,6 +14,7 @@ import type {
   QualityOptimizationMode,
   QualityCodec,
   QualityLimits,
+  VideoSendStats,
 } from '../types';
 import { validateCustomQuality } from '../lib/qualityValidation';
 import { NoticeBanners } from '../components/notices/NoticeCenter';
@@ -41,6 +42,86 @@ function parseCustomDraft(draft: {
     optimizationMode: draft.optimizationMode,
     codec: draft.codec,
   };
+}
+
+const NETWORK_QUALITY_LABEL: Record<number, string> = {
+  0: '未知', 1: '极好', 2: '好', 3: '一般', 4: '差', 5: '很差', 6: '断开',
+};
+
+/** 拿不到就显示"—"，绝不补 0 —— "实际 0" 和 "未知" 不能看起来一样。 */
+function fmt(value: number | null | undefined, suffix = ''): string {
+  return value == null ? '—' : `${value}${suffix}`;
+}
+
+function StatsPanel({ target, actual }: { target: QualitySnapshot | null; actual: VideoSendStats | null }) {
+  const rows: { label: string; targetValue: string; actualValue: string; warn?: boolean }[] = [
+    {
+      label: '分辨率',
+      targetValue: target ? `${target.width}×${target.height}` : '—',
+      actualValue: actual && actual.sendResolutionWidth && actual.sendResolutionHeight
+        ? `${actual.sendResolutionWidth}×${actual.sendResolutionHeight}` : '—',
+    },
+    {
+      label: '帧率',
+      targetValue: target ? `${target.frameRate} fps` : '—',
+      actualValue: fmt(actual?.sendFrameRate, ' fps'),
+    },
+    {
+      label: '码率',
+      targetValue: target
+        ? (target.bitrateMin != null || target.bitrateMax != null
+          ? `${target.bitrateMin ?? '—'}~${target.bitrateMax ?? '—'} Kbps` : '自动')
+        : '—',
+      actualValue: fmt(actual?.sendBitrateKbps, ' Kbps'),
+    },
+    {
+      label: '编码格式',
+      targetValue: target ? target.codec.toUpperCase() : '—',
+      actualValue: actual?.codecType ?? '—',
+    },
+    {
+      label: '网络状况（上行）',
+      targetValue: '—',
+      actualValue: actual?.uplinkNetworkQuality != null
+        ? `${NETWORK_QUALITY_LABEL[actual.uplinkNetworkQuality] ?? '未知'}（${actual.uplinkNetworkQuality}）`
+        : '—',
+      warn: actual?.uplinkNetworkQuality != null && actual.uplinkNetworkQuality >= 4,
+    },
+    { label: '往返时延', targetValue: '—', actualValue: fmt(actual?.sendRttMs, ' ms') },
+    { label: '抖动', targetValue: '—', actualValue: fmt(actual?.sendJitterMs, ' ms') },
+    { label: '丢包', targetValue: '—', actualValue: fmt(actual?.sendPacketsLost) },
+  ];
+
+  return (
+    <div className="mb-4 glass rounded-xl p-4">
+      <p className="text-xs text-muted mb-3">目标参数 vs 实际发送</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-muted">
+              <th className="text-left font-medium pb-2">指标</th>
+              <th className="text-right font-medium pb-2">目标</th>
+              <th className="text-right font-medium pb-2">实际</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label} className="border-t border-white/5">
+                <td className="py-1.5 text-muted">{row.label}</td>
+                <td className="py-1.5 text-right font-mono">{row.targetValue}</td>
+                <td className={cn('py-1.5 text-right font-mono', row.warn && 'text-yellow-300')}>
+                  {row.actualValue}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-dim mt-2">
+        实际值来自 SDK 统计，每秒采样一次；部分字段在特定浏览器上不可得，显示为「—」。
+      </p>
+    </div>
+  );
 }
 
 function CustomQualityForm({
@@ -174,6 +255,8 @@ export default function SharePage() {
   const [lowLatency, setLowLatency] = useState(false);
   const [liveSwitching, setLiveSwitching] = useState(false);
   const [liveError, setLiveError] = useState('');
+  /** SDK 实际发送统计（null 字段表示"该平台拿不到"，而非 0 */
+  const [sendStats, setSendStats] = useState<VideoSendStats | null>(null);
   /** 运行中可调项（optimizationMode / codec 不支持运行中切换） */
   const [liveDraft, setLiveDraft] = useState({
     width: '1920',
@@ -423,6 +506,22 @@ export default function SharePage() {
     return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
+  // 共享中每秒采样一次实际发送统计；停止共享时清空
+  useEffect(() => {
+    if (!screenShare.isSharing) {
+      setSendStats(null);
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      const sample = await screenShare.sampleStats();
+      if (!cancelled) setSendStats(sample);
+    };
+    void tick();
+    const id = setInterval(() => void tick(), 1000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [screenShare.isSharing, screenShare.sampleStats]);
+
   useEffect(() => {
     if (socket.ended) {
       screenShare.stop();
@@ -640,6 +739,11 @@ export default function SharePage() {
               </div>
               {liveError && <p className="text-xs text-red-300 mt-2">{liveError}</p>}
             </div>
+          )}
+
+          {/* 目标 vs 实际发送统计（仅共享中显示） */}
+          {screenShare.isSharing && (
+            <StatsPanel target={activeSnapshot} actual={sendStats} />
           )}
 
           {/* 生效参数 + 服务端风险提示 */}

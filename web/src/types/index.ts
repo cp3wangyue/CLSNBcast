@@ -249,6 +249,35 @@ export interface QualityIssue {
   message: string;
 }
 
+/**
+ * 实际发送统计（用于"目标 vs 实际"对比）。
+ *
+ * ⚠️ 所有字段都可能为 null：`sendFrameRate` 在 Firefox 上不可得，
+ * `captureFrameRate` 在 Safari / Firefox 上不可得。缺字段时**不补 0** ——
+ * 补 0 会让"实际 0fps"和"拿不到这个字段"在界面上看起来一样。
+ */
+export interface VideoSendStats {
+  codecType: string | null;
+  /** 实际发送帧率；Firefox 上不可得 */
+  sendFrameRate: number | null;
+  /** 采集帧率；Safari / Firefox 上不可得 */
+  captureFrameRate: number | null;
+  /** 实际发送分辨率 */
+  sendResolutionWidth: number | null;
+  sendResolutionHeight: number | null;
+  /** Kbps */
+  sendBitrateKbps: number | null;
+  sendBytes: number | null;
+  /** 往返时延 ms */
+  sendRttMs: number | null;
+  /** 抖动 ms */
+  sendJitterMs: number | null;
+  sendPacketsLost: number | null;
+  /** 上行网络质量 0-6；null 表示未知 */
+  uplinkNetworkQuality: number | null;
+  sampledAt: number;
+}
+
 /** 自定义画质的参数边界，由服务端下发（前端用它做同样的两档校验）。 */
 export interface QualityLimits {
   width: { min: number; max: number; step: number };
