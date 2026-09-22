@@ -16,6 +16,8 @@ import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
 import { QUALITY_PRESETS } from '../session/session.types';
 import { AgoraProviderService } from '../agora/agora-provider.service';
+import { QualityConfigService } from '../quality/quality-config.service';
+import { QualityPresetService } from '../quality/quality-preset.service';
 import { SecretCryptoService } from '../crypto/secret-crypto.service';
 import {
   CreateSpaceProviderDto,
@@ -34,6 +36,8 @@ export class ServerAdminController {
   constructor(
     private readonly db: DatabaseService,
     private readonly providers: AgoraProviderService,
+    private readonly qualityConfig: QualityConfigService,
+    private readonly presets: QualityPresetService,
     private readonly crypto: SecretCryptoService,
   ) {}
 
@@ -141,6 +145,21 @@ export class ServerAdminController {
       agoraAppCertificate: server.agoraAppCertificate ? '******' : '',
       agoraTokenExpireSec: server.agoraTokenExpireSec,
       allowedQualities: JSON.parse(server.allowedQualities),
+      // 画质预设由服务端下发，避免前端再维护一份必须与后端手工同步的硬编码副本
+      qualityPresets: this.presets.list().map((preset) => ({
+        id: preset.id,
+        label: preset.label,
+        width: preset.width,
+        height: preset.height,
+        frameRate: preset.frameRate,
+        bitrateMin: preset.bitrateMin,
+        bitrateMax: preset.bitrateMax,
+        optimizationMode: preset.optimizationMode,
+        codec: preset.codec,
+        enabled: preset.enabled,
+        sortOrder: preset.sortOrder,
+        tier: this.qualityConfig.tierRuleFor(preset.width, preset.height).tier,
+      })),
       triggerWordLabels: this.db.getGlobalConfig().triggerWordLabels,
       enabledTriggerWords: server.triggerWords.split(',').map(word => word.trim()).filter(Boolean),
       idleTimeoutSec: server.idleTimeoutSec,

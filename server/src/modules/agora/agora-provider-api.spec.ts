@@ -49,7 +49,7 @@ describe('Agora Provider 管理端接口', () => {
     presets.onModuleInit();
     secretCrypto = new SecretCryptoService(db);
     superAdmin = new SuperAdminController(db, providers, qualityConfig, ledger, presets, secretCrypto);
-    spaceAdmin = new ServerAdminController(db, providers, secretCrypto);
+    spaceAdmin = new ServerAdminController(db, providers, qualityConfig, presets, secretCrypto);
 
     db.createServer(SPACE_A, 'A 服务器', 'owner-a', '服主A');
     db.createServer(SPACE_B, 'B 服务器', 'owner-b', '服主B');
