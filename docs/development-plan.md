@@ -387,9 +387,14 @@ npm run verify        # = typecheck + build + test
         已改为 pause → 写快照 → resume → 开区间，并由测试锁定
   - [x] 单测 7 个：切换生效、部分参数保持、区间切分、非法参数拒绝、无快照时报错、
         优化模式与编码格式保持、主播区间不被打断
-- [ ] **3-5 统计面板**：`getStats()` + `network-quality`，目标 vs 实际对比
-  - [ ] ⚠️ 注意：本项目 preset key 与 Agora 内置 preset 名**部分同名但语义不同**（详见 [architecture-analysis.md](./architecture-analysis.md) 第 2 节 SDK 核实）。**绝不能把本项目的 quality key 直接当 `VideoEncoderConfigurationPreset` 字符串传给 SDK**，必须在类型层面隔离
-- [ ] 超管画质预设管理 UI（服务端 `QualityPresetService` 已就绪）
+- [x] **3-5 统计面板**：`getStats()` 每秒采样 + 上行网络质量，目标 vs 实际对比；
+      缺失字段显示为「—」而非补 0；网络质量 ≥4 时黄色高亮
+- [x] **3-6 画质预设管理**
+  - [x] 超管 `GET/POST/PUT/DELETE /api/super/qualities`（列表带计费档位）
+  - [x] 前端「画质预设」标签页：新建 / 编辑 / 停用 / 删除 / 排序
+  - [x] 编辑态 **ID 输入框禁用**；内置与被会话引用的不可删除，服务端拒绝并给出原因
+  - [x] **HTTP + 浏览器实测**：7 档预设带正确档位、新建自定义档（2560×1440@60 / detail / VP9 / 3000~9000 Kbps）
+        出现在列表且档位为 2K、删除内置被拒并提示「如需停用请改为『停用』」
 
 ### 验收
 

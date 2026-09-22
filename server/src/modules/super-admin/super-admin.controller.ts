@@ -445,10 +445,24 @@ export class SuperAdminController {
 
   // ===== 画质预设（Phase 3）=====
 
-  /** 全部预设（含停用），按 sort_order 升序。 */
+  /** 全部预设（含停用），按 sort_order 升序。附带计费档位，便于核对每档怎么计费。 */
   @Get('qualities')
   listQualities() {
-    return this.presets.list();
+    return this.presets.list().map((preset) => ({
+      id: preset.id,
+      label: preset.label,
+      width: preset.width,
+      height: preset.height,
+      frameRate: preset.frameRate,
+      bitrateMin: preset.bitrateMin,
+      bitrateMax: preset.bitrateMax,
+      optimizationMode: preset.optimizationMode,
+      codec: preset.codec,
+      enabled: preset.enabled,
+      isBuiltin: preset.isBuiltin,
+      sortOrder: preset.sortOrder,
+      tier: this.qualityConfig.tierRuleFor(preset.width, preset.height).tier,
+    }));
   }
 
   /**

@@ -211,6 +211,8 @@ export interface QualityPresetOption {
   optimizationMode: QualityOptimizationMode;
   codec: QualityCodec;
   enabled: boolean;
+  /** 初始播种项：不可删除，只能停用 */
+  isBuiltin: boolean;
   sortOrder: number;
   /** 服务端按分辨率推导的计费档位（展示用） */
   tier?: string;

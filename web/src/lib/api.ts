@@ -10,6 +10,8 @@ import type {
   CustomQualityInput,
   QualityIssue,
   QualityLimits,
+  QualityOptimizationMode,
+  QualityCodec,
 } from '../types';
 
 const SUPER_TOKEN_KEY = 'clsnbcast_super_token';
@@ -489,6 +491,39 @@ export const api = {
       spaceApiBase(platform, externalId) + '/providers/' + encodeURIComponent(id),
       { method: 'DELETE' },
     );
+  },
+
+  // ===== Quality Presets（超管）=====
+  getSuperQualities(): Promise<QualityPresetOption[]> {
+    return superRequest('/api/super/qualities');
+  },
+  createSuperQuality(input: {
+    id: string; label: string; width: number; height: number; frameRate: number;
+    bitrateMin?: number | null; bitrateMax?: number | null;
+    optimizationMode?: QualityOptimizationMode; codec?: QualityCodec;
+    enabled?: boolean; sortOrder?: number;
+  }): Promise<{ ok: boolean; preset?: QualityPresetOption; message?: string }> {
+    return superRequest('/api/super/qualities', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  updateSuperQuality(
+    id: string,
+    input: Partial<{
+      label: string; width: number; height: number; frameRate: number;
+      bitrateMin: number | null; bitrateMax: number | null;
+      optimizationMode: QualityOptimizationMode; codec: QualityCodec;
+      enabled: boolean; sortOrder: number;
+    }>,
+  ): Promise<{ ok: boolean; preset?: QualityPresetOption; message?: string }> {
+    return superRequest('/api/super/qualities/' + encodeURIComponent(id), {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+  },
+  deleteSuperQuality(id: string): Promise<{ ok: boolean; message?: string }> {
+    return superRequest('/api/super/qualities/' + encodeURIComponent(id), { method: 'DELETE' });
   },
 
   // ===== Usage Dashboard（超管）=====
