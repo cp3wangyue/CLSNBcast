@@ -398,11 +398,11 @@ npm run verify        # = typecheck + build + test
 
 ### 验收
 
-- [x] `npm run verify` 通过（454 个测试：server 428 + web 26）
-- [x] ✅ 回归：7 个预设内容与原硬编码 `QUALITY_PRESETS` **逐项一致**（单测逐字段断言），
-      因此现有画质选择行为完全不变
-- [x] ✅ 等价验证：自定义 1600×900@45 + 码率 1500 通过校验，档位推导为 Full HD
-      （真实推流需真机验证，见下）
+- [x] `npm run verify` 通过（480 个测试：server 454 + web 26）
+- [x] ✅ 所有画质列表**均为服务端下发**（`web/dist` 已无 `QUALITY_OPTIONS` 副本）；
+      分享页与服务器管理页都改用 `qualityPresets`，实测：预设数量与档位正确、勾选状态与 `allowedQualities` 一致
+- [x] ✅ 预设内容与原硬编码表逐项一致（7 档，id 全部沿用），现有画质选择行为不变
+- [x] ✅ 等价验证：自定义 1600×900@45 + 码率 1500 通过校验，档位推导为 Full HD（真机推流待验证）
 - [x] ✅ 等价验证：运行中从 1080p 切到 720p，账本产生两个区间且档位各自正确
       （SDK 切换本身需真机验证，见下）
 - [ ] 真实环境验证（需真实 Agora 凭证 + 浏览器）：
@@ -412,7 +412,7 @@ npm run verify        # = typecheck + build + test
       - 统计面板数字与实际相符。
 
 **Phase 3 已完成**（commit `74fcbde` / `60abcee` / `86c4d76` / `d05fb92` /
-`a54b74b` / `ba3fd8c` / `c97fec3`）。
+`a54b74b` / `ba3fd8c` / `c97fec3` / `f4917ef` / `f70f4ed`）。
 
 ### commit 划分
 
