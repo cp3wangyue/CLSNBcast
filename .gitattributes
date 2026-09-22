@@ -1,0 +1,20 @@
+# 行尾归一化：仓库内统一存 LF，检出时也保持 LF。
+#
+# deploy.sh 的第 4 步通过 heredoc 把一段脚本经 ssh 交给远端 Linux bash 执行。
+# 若工作区是 CRLF，heredoc 里每一行都会带上 CR，远端的 `set -Eeuo pipefail`、
+# 变量赋值与 `docker compose` 调用都会因尾随 CR 而解析失败。
+# core.autocrlf=true 只保证「提交时归一化为 LF」，不保证检出形态，
+# 因此这里对会被上传到 Linux 的文件显式固定检出为 LF。
+#
+# 范围刻意收窄：只覆盖 deploy.sh 打包上传的部署文件（tar 清单见脚本第 2 步）
+# 与 shell 脚本本身；TypeScript 源码等不参与远端执行，不在此约束。
+
+*.sh text eol=lf
+
+# deploy.sh 打包上传、并在远端被读取/执行的文件
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+deploy/Caddyfile text eol=lf
+package.json text eol=lf
+server/package.json text eol=lf
+web/package.json text eol=lf
