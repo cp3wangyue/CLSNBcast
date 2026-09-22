@@ -1,113 +1,233 @@
-# CLSNBcast 部署指南
+# 部署指南（自托管）
 
-## 前置条件
+在普通 Linux VPS 上使用 Docker Compose 部署 CLSNBcast。
 
-- 服务器安装 Docker 和 Docker Compose
-- 开放 3520 端口（或自定义 `PORT`）
-- KOOK 机器人 Token（在 [KOOK 开发者中心](https://developer.kookapp.cn/) 创建机器人获取）
+有两种形态：
 
-## 部署步骤
+- **推荐**：Caddy 反向代理 + 自动 HTTPS（`docker-compose.yml`）
+- **备选**：已有 Nginx 自行终止 TLS（见文末）
 
-### 1. 配置环境变量
+---
+
+## 0. 前置条件
+
+- 服务器安装 Docker 与 Docker Compose 插件
+- 一个指向本机公网 IP 的域名（A 记录），例如 `share.example.com`
+- 开放 **80 / 443** 端口（80 用于 HTTP-01 证书校验与跳转）
+
+> ⚠️ **必须使用 HTTPS。** 浏览器只在安全上下文或 localhost 下允许
+> `getDisplayMedia`（屏幕采集），通过 `http://` 访问时分享页会直接报权限错误。
+
+---
+
+## 1. 准备文件
 
 ```bash
+git clone https://github.com/cp3wangyue/CLSNBcast.git
+cd CLSNBcast
+
 cp .env.example .env
-vim .env
 ```
 
-必须填写：
+编辑 `.env`，至少填写：
 
 | 变量 | 说明 |
-|------|------|
-| `SUPER_ADMIN_PASSWORD` | **必填**，超级管理员登录密码 |
-| `PORT` | 服务端口，默认 3520 |
+|---|---|
+| `DOMAIN` | 对外域名，Caddy 用它自动签发证书 |
+| `SUPER_ADMIN_PASSWORD` | 超管登录密码（**未设置则服务拒绝启动**） |
+| `SECRET_ENCRYPTION_KEY` | 32 字节主密钥，见下 |
 
-> Agora 凭证和 KOOK Bot Token 不在环境变量配置——机器人加入服务器后，由频道主在管理面板中为每个服务器独立配置。
-
-### 2. 本地构建 dist
-
-```bash
-npm run build
-```
-
-将以下文件上传到服务器（不需要上传源码或 `node_modules`）：
-
-- `server/dist/`
-- `web/dist/`
-- `Dockerfile`
-- `docker-compose.yml`
-- `package.json`
-- `package-lock.json`
-- `server/package.json`
-- `web/package.json`
-
-### 3. 在线构建运行镜像并启动
+生成主密钥：
 
 ```bash
-# 在服务器的部署目录执行
-docker compose up -d --build
+openssl rand -hex 32
 ```
 
-Docker 在线构建阶段只会安装服务端生产依赖，并把已上传的两个 `dist`
-目录装入运行镜像；不会再次编译前端或 TypeScript，也不依赖服务器上已有的旧镜像。
+> 🔐 该密钥用于加密存储 Agora App Certificate 与 Customer Secret。
+> **务必备份**：丢失后库中已存的凭证将无法解密。
+> 它只在首次运行时需要；一旦库中已有密文，缺失该变量会导致启动失败（这是刻意的，避免带着读不出凭证的状态继续运行）。
 
-### 4. 配置超管面板
+---
 
-1. 访问 `http://你的域名:3520/super`
-2. 使用 `SUPER_ADMIN_PASSWORD` 登录
-3. 在「全局配置」中填入 KOOK Bot Token、Verify Token、Encrypt Key 和公网域名
-4. 在 KOOK 开发者后台将机器人连接模式设为 **WebHook**
-5. Callback URL 填写超管页面显示的地址（必须保留 `?compress=0`）
-6. 在 KOOK 后台填写相同的 Encrypt Key，完成 Challenge 后上线机器人
-7. 邀请机器人到 KOOK 服务器，机器人会自动同步服务器列表
+## 2. 本地构建产物
 
-### 5. 服务器绑定（频道主操作）
-
-1. 机器人加入后自动向频道主发送绑定卡片
-2. 若未收到，频道主在 KOOK 频道发送 `/cbhelp` 调起绑定
-3. 点击绑定卡片 → 设置管理密码 → 配置 Agora App ID 和 App Certificate
-
-### 6. 开始使用
-
-频道内发送触发词（默认「屏幕共享」）→ 机器人推送卡片 → 点击开始共享。
-
-## 反向代理（推荐）
-
-```nginx
-server {
-    listen 80;
-    server_name share.example.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:3520;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_http_version 1.1;
-
-        # SSE 支持
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 86400s;
-        proxy_send_timeout 86400s;
-    }
-
-    # KOOK WebHook 回调请求体上限
-    client_max_body_size 1m;
-}
-```
-
-## 管理命令
+镜像内**不编译**源码，只装载构建好的 `dist`。
 
 ```bash
-# 查看日志
+npm install
+npm run build          # = build:web + build:server
+```
+
+产物：`server/dist/`、`web/dist/`。
+
+---
+
+## 3. 上传到服务器并启动
+
+把以下内容上传到服务器同一目录：
+
+```
+Dockerfile
+docker-compose.yml
+deploy/Caddyfile
+package.json
+package-lock.json
+server/package.json
+web/package.json
+server/dist/
+web/dist/
+.env                   # 不要提交到仓库
+```
+
+启动：
+
+```bash
+docker compose build --pull
+docker compose up -d
+```
+
+查看状态（两个服务都应为 healthy）：
+
+```bash
+docker compose ps
 docker compose logs -f
-
-# 重启
-docker compose restart
-
-# 停止
-docker compose down
 ```
+
+---
+
+## 4. 初始化配置
+
+1. 访问 `https://<你的域名>/super`，用 `SUPER_ADMIN_PASSWORD` 登录
+2. 「全局配置」：填写 KOOK Bot Token、Verify Token、Encrypt Key、公网域名
+3. KOOK 开发者后台：连接模式设为 **WebHook**，Callback URL 填超管页面显示的地址
+   （**必须保留 `?compress=0`**），并填写相同的 Encrypt Key
+4. 邀请机器人进服务器，随后按页面提示绑定服务器管理面板
+
+### Agora 凭证（多租户）
+
+凭证不再填在服务器配置里，而在**「Agora 凭证池」**中管理：
+
+- `platform` = 我们自己的账号，作为全局默认池
+- `space` = 某个 KOOK 服务器自带凭证
+- `user` = 用户自带凭证（BYOK）
+
+App Certificate 加密存储，**任何接口都不会返回明文**；需要轮换时重新填写即可。
+
+会话创建时会固定绑定一个 Provider，并在会话上记录 App ID 快照。
+若之后改动了 Provider 的 App ID，进行中的会话会明确报错要求重新发起，
+而不会被静默发到另一个声网项目。
+
+---
+
+## 5. 数据与备份
+
+SQLite 数据库位于命名卷 `clsnbcast-data` 的 `/app/data/clsnbcast.db`。
+
+备份：
+
+```bash
+docker run --rm \
+  -v clsnbcast-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/clsnbcast-data-$(date +%F).tar.gz -C /data .
+
+# 恢复
+docker run --rm \
+  -v clsnbcast-data:/data -v "$PWD":/backup alpine \
+  tar xzf /backup/clsnbcast-data-YYYY-MM-DD.tar.gz -C /data
+```
+
+> 备份时建议先 `docker compose stop clsnbcast`，或使用 SQLite 的 `.backup` 命令以获得一致性快照。
+> 备份里包含加密后的凭证，**同时需要 `SECRET_ENCRYPTION_KEY` 才能恢复使用**。
+
+---
+
+## 6. 升级
+
+```bash
+# 拉取上游更新后重新构建 dist
+npm install && npm run build
+# 上传 dist 与必要的配置文件
+docker compose build --pull
+docker compose up -d
+```
+
+数据库迁移由应用启动时自动执行（见 `schema_migrations` 表）。**升级前请备份数据卷。**
+
+---
+
+## 7. 运维命令
+
+```bash
+docker compose ps            # 状态与健康检查
+docker compose logs -f       # 日志
+docker compose restart       # 重启
+docker compose down          # 停止（保留数据卷）
+docker compose down -v       # 停止并删除数据卷（⚠️ 会丢数据）
+```
+
+---
+
+## 备选：使用已有的 Nginx
+
+如果你已有 Nginx 负责 TLS，可以只运行应用容器，并把 Nginx 指到它。此时：
+
+1. 在 `docker-compose.yml` 中给 `clsnbcast` 加回端口映射：
+
+   ```yaml
+   ports:
+     - "127.0.0.1:${PORT:-3520}:3520"
+   ```
+
+2. 删除（或不启动）`caddy` 服务。
+
+3. Nginx 参考配置：
+
+   ```nginx
+   server {
+       listen 443 ssl http2;
+       server_name share.example.com;
+
+       # ssl_certificate / ssl_certificate_key ...
+
+       location / {
+           proxy_pass http://127.0.0.1:3520;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+
+           proxy_http_version 1.1;
+
+           # SSE 支持（必须关闭缓冲）
+           proxy_buffering off;
+           proxy_cache off;
+           proxy_read_timeout 86400s;
+           proxy_send_timeout 86400s;
+       }
+
+       client_max_body_size 2m;
+   }
+   ```
+
+> 应用只信任**一跳**代理（`trust proxy = 1`）。若 Nginx 外层还有 CDN 或多层代理，
+> 需要相应调整；否则按 IP 的登录限流会失效。
+
+---
+
+## 环境变量一览
+
+见 [.env.example](./.env.example)。运行时读取的变量：
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `SUPER_ADMIN_PASSWORD` | ✅ | 超管密码，同时作为超管 token 的 HMAC 密钥 |
+| `SECRET_ENCRYPTION_KEY` | 建议 | 秘密加密主密钥（32 字节 hex/base64） |
+| `DOMAIN` | 部署时 | Caddy 对外域名 |
+| `PORT` | | 应用监听端口，默认 3520 |
+| `ALLOWED_ORIGINS` | | CORS 额外域名，逗号分隔 |
+| `KOOK_BOT_TOKEN` | | 首次启动时播种到数据库 |
+| `KOOK_API_TIMEOUT_MS` | | KOOK HTTP 超时，默认 10000 |
+| `DATA_DIR` | | 数据目录，默认 `<工作目录>/data` |
+| `TRUST_PROXY` | | 设为 `false` 可关闭 `trust proxy`（仅在直接暴露应用时） |
+
+> 任何秘密都**不会**出现在前端 bundle 中，也不会写入日志（进程级日志脱敏）。

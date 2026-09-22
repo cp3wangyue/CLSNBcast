@@ -25,6 +25,7 @@ echo "[2/5] 打包运行所需文件"
 tar -czf "$LOCAL_ARCHIVE" \
   Dockerfile \
   docker-compose.yml \
+  deploy/Caddyfile \
   package.json \
   package-lock.json \
   server/package.json \
@@ -70,9 +71,11 @@ mkdir -p "${REMOTE_DIR}/server" "${REMOTE_DIR}/web"
 mv "${STAGE_DIR}/server/dist" "${REMOTE_DIR}/server/dist"
 mv "${STAGE_DIR}/web/dist" "${REMOTE_DIR}/web/dist"
 
+mkdir -p "${REMOTE_DIR}/deploy"
 for file in Dockerfile docker-compose.yml package.json package-lock.json; do
   mv -f -- "${STAGE_DIR}/${file}" "${REMOTE_DIR}/${file}"
 done
+mv -f -- "${STAGE_DIR}/deploy/Caddyfile" "${REMOTE_DIR}/deploy/Caddyfile"
 mv -f -- "${STAGE_DIR}/server/package.json" "${REMOTE_DIR}/server/package.json"
 mv -f -- "${STAGE_DIR}/web/package.json" "${REMOTE_DIR}/web/package.json"
 
