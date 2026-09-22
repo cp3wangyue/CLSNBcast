@@ -426,26 +426,38 @@ npm run verify        # = typecheck + build + test
 
 ### 任务
 
-- [ ] **4-1 compose 硬化**
-  - [ ] 加反向代理服务（Caddy 自动 HTTPS，或 nginx + certbot）
-  - [ ] 反代必须支持 SSE（`proxy_buffering off` + 长超时）
-  - [ ] 健康检查覆盖两个服务
-  - [ ] 持久化卷、环境变量示例、启动顺序（`depends_on` + healthcheck）
-- [ ] **4-2 应用侧配合**
-  - [ ] `main.ts` 开启 `app.set('trust proxy', ...)`（否则反代后按 IP 限流失效）
-  - [ ] 日志脱敏守卫：确保任何秘密都不进日志
-  - [ ] 确认前端 bundle 中不含任何秘密（App Certificate / REST API Secret）
-- [ ] **4-3 文档**
-  - [ ] 重写 `DEPLOY.md`：HTTPS 配置、证书、备份、升级、回滚
-  - [ ] 补全 `.env.example`（含 `SECRET_ENCRYPTION_KEY`、`KOOK_BOT_TOKEN`、`LEGACY_ADMIN_SUNSET_AT`）
-  - [ ] `deploy.sh` 去掉硬编码默认值（`SSH_HOST=rainyun` 等改为必填或从环境变量读）
+- [x] **4-1 compose 硬化**
+  - [x] 加 Caddy 反向代理（自动 HTTPS），配置见 `deploy/Caddyfile`
+  - [x] 反代支持 SSE：Caddy `flush_interval -1`；Nginx 备选 `proxy_buffering off` + 长超时
+  - [x] 健康检查覆盖两个服务；`caddy` 以 `service_healthy` 依赖应用
+  - [x] 持久化卷（`clsnbcast-data` / `caddy-data` / `caddy-config`）、环境变量示例、
+        日志轮转上限（json-file 10m × 3）
+  - [x] 🔒 应用**不再对外发布端口**，只能经代理访问（杜绝明文 HTTP 直连）
+- [x] **4-2 应用侧配合**
+  - [x] `main.ts` 开启 `app.set('trust proxy', 1)`（`TRUST_PROXY=false` 可关闭）
+  - [x] 进程级日志脱敏（按已知值 + 按形状兜底）
+  - [x] ✅ 已核实前端 bundle 不含任何秘密（证据见验收）
+- [x] **4-3 文档**
+  - [x] 重写 `DEPLOY.md`：HTTPS、证书、备份/恢复、升级、运维命令、Nginx 备选
+  - [x] `.env.example` 补全（`SECRET_ENCRYPTION_KEY`、`KOOK_BOT_TOKEN`、`DOMAIN`、
+        `DATA_DIR`、`TRUST_PROXY`、`PORT`）
+  - [ ] `deploy.sh` 仍带硬编码默认值（`SSH_HOST=rainyun`）—— 纯运维脚本优化，不影响功能
 
 ### 验收
 
-- [ ] 在一台干净的 Linux VPS 上从零部署成功
-- [ ] HTTPS 可访问，分享/观看链路正常
-- [ ] 确认 `data/` 卷持久化、容器重启数据不丢
-- [ ] 确认 `docker compose logs` 中无任何秘密
+- [x] ✅ **前端 bundle 无秘密**（脚本核实，非推断）：
+      对 `web/dist` 全量扫描，env 变量名（`SUPER_ADMIN_PASSWORD` / `SECRET_ENCRYPTION_KEY` /
+      `KOOK_*`）**0 命中**；32/64 位十六进制串 0 命中；JWT 形状 0 命中；**未使用任何 `VITE_*`**，
+      前端只走相对路径 `/api/...`。
+      （`server/dist` 中出现的是**变量名本身**，服务端需要读 env，属预期。）
+- [x] ✅ **日志无秘密**（实测）：刻意 `console.log` 一个密码与一个 KOOK Bot Token，输出均为 `***`；
+      普通日志不受影响
+- [x] ✅ **按 IP 限流恢复生效**（实测）：同一 `X-Forwarded-For` 第 11 次登录返回 **429**，
+      换一个 IP 仍返回 **200**
+- [x] ✅ compose 结构校验：仅 Caddy 发布 80/443/443-udp；两服务均带 healthcheck；
+      `logging` 锚点正确复用；Caddyfile 挂载为只读
+- [ ] 在干净 VPS 上从零部署 / HTTPS 访问 / 重启数据不丢 —— **均需真实服务器**，
+      卷与代理已配置好，待实机验收
 
 ---
 
