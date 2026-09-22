@@ -172,6 +172,16 @@ export default function SharePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [lowLatency, setLowLatency] = useState(false);
+  const [liveSwitching, setLiveSwitching] = useState(false);
+  const [liveError, setLiveError] = useState('');
+  /** 运行中可调项（optimizationMode / codec 不支持运行中切换） */
+  const [liveDraft, setLiveDraft] = useState({
+    width: '1920',
+    height: '1080',
+    frameRate: '30',
+    bitrateMin: '',
+    bitrateMax: '',
+  });
   const [copied, setCopied] = useState(false);
   const [allowedQualities, setAllowedQualities] = useState<string[]>([]);
   /** 服务端下发的画质预设（替代原先前端硬编码的 QUALITY_OPTIONS） */
@@ -366,6 +376,47 @@ export default function SharePage() {
     clearActiveShare();
   }, [screenShare, socket]);
 
+  /**
+   * 共享进行中动态切换编码参数。
+   *
+   * 先由服务端校验并切分账本区间，再调用 SDK 的 `setEncoderConfiguration` ——
+   * 顺序不能反：服务端先落地档位，账目才不会把切换前的时间算到新档位上。
+   */
+  const handleLiveSwitch = useCallback(async () => {
+    setLiveError('');
+    setLiveSwitching(true);
+    try {
+      const payload = {
+        width: Number(liveDraft.width),
+        height: Number(liveDraft.height),
+        frameRate: Number(liveDraft.frameRate),
+        bitrateMin: liveDraft.bitrateMin.trim() === '' ? null : Number(liveDraft.bitrateMin),
+        bitrateMax: liveDraft.bitrateMax.trim() === '' ? null : Number(liveDraft.bitrateMax),
+      };
+      const resp = await api.updateLiveQuality(token, payload);
+      if (!resp.ok) {
+        setLiveError(resp.message || '切换失败');
+        return;
+      }
+      const result = await screenShare.setEncoderConfig({
+        width: payload.width,
+        height: payload.height,
+        frameRate: payload.frameRate,
+        ...(payload.bitrateMin != null ? { bitrateMin: payload.bitrateMin } : {}),
+        ...(payload.bitrateMax != null ? { bitrateMax: payload.bitrateMax } : {}),
+      });
+      if (!result.success) {
+        setLiveError(result.message || 'SDK 切换失败');
+        return;
+      }
+      if (resp.quality) setActiveSnapshot(resp.quality);
+    } catch (e: any) {
+      setLiveError(e?.message || '切换失败');
+    } finally {
+      setLiveSwitching(false);
+    }
+  }, [token, liveDraft, screenShare]);
+
   useEffect(() => {
     const handler = () => { stopRef.current(); };
     window.addEventListener('beforeunload', handler);
@@ -532,6 +583,64 @@ export default function SharePage() {
               />
             )}
           </div>
+
+          {/* 运行中动态切换（仅共享中显示；分辨率 / 帧率 / 码率可切） */}
+          {screenShare.isSharing && (
+            <div className="mb-4 glass rounded-xl p-4">
+              <p className="text-xs text-muted mb-3">
+                运行中调整编码参数（无需重新发起共享）
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
+                {(['width', 'height', 'frameRate'] as const).map((key) => (
+                  <label key={key} className="block">
+                    <span className="text-xs text-muted mb-1 block">
+                      {key === 'width' ? '宽度' : key === 'height' ? '高度' : '帧率'}
+                    </span>
+                    <input
+                      type="number"
+                      value={liveDraft[key]}
+                      onChange={(e) => setLiveDraft({ ...liveDraft, [key]: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </label>
+                ))}
+                <label className="block">
+                  <span className="text-xs text-muted mb-1 block">最低码率 Kbps</span>
+                  <input
+                    type="number"
+                    value={liveDraft.bitrateMin}
+                    onChange={(e) => setLiveDraft({ ...liveDraft, bitrateMin: e.target.value })}
+                    placeholder="留空=不传"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs text-muted mb-1 block">最高码率 Kbps</span>
+                  <input
+                    type="number"
+                    value={liveDraft.bitrateMax}
+                    onChange={(e) => setLiveDraft({ ...liveDraft, bitrateMax: e.target.value })}
+                    placeholder="留空=不传"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+                  />
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleLiveSwitch}
+                  disabled={liveSwitching}
+                  className="px-4 py-2 rounded-lg text-sm btn-brand text-white disabled:opacity-40 flex items-center gap-1.5"
+                >
+                  {liveSwitching && <Loader2 className="w-4 h-4 animate-spin" />}
+                  应用
+                </button>
+                <span className="text-xs text-dim">
+                  优化模式与编码格式在运行中不可切换（需重新建立连接）
+                </span>
+              </div>
+              {liveError && <p className="text-xs text-red-300 mt-2">{liveError}</p>}
+            </div>
+          )}
 
           {/* 生效参数 + 服务端风险提示 */}
           {activeSnapshot && (

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { randomBytes, randomUUID } from 'crypto';
 import { DatabaseService, ServerSession, UsageIntervalClosedReason } from '../database/database.service';
@@ -578,9 +578,72 @@ export class SessionService implements OnModuleInit {
     );
   }
 
+  /**
+   * 共享进行中切换编码参数（分辨率 / 帧率 / 码率）。
+   *
+   * `optimizationMode` 与 `codec` **不支持**运行中切换：前者不是
+   * `VideoEncoderConfiguration` 的字段（只能在创建 track 时给），后者是 client 级参数，
+   * 改动需要 leave → 重建 client → join → publish，会中断观众画面。前端会把这两项置灰。
+   *
+   * 🔑 每次切换都会**切分账本区间**：关掉按旧档位结算的区间、开一个按新档位的，
+   * 因此账目不会把切换前的时间算到新档位上。
+   */
   /** 读取会话的画质快照（不存在返回 null）。 */
   getQualitySnapshot(sessionId: string): QualitySnapshot | null {
     return this.readQualitySnapshot(sessionId);
+  }
+
+  updateQualityLive(
+    sessionId: string,
+    input: {
+      width?: number;
+      height?: number;
+      frameRate?: number;
+      bitrateMin?: number | null;
+      bitrateMax?: number | null;
+    },
+  ): QualitySnapshot {
+    const session = this.getById(sessionId);
+    if (!session) throw new Error('session not found');
+
+    const current = this.readQualitySnapshot(sessionId);
+    if (!current) {
+      throw new Error('session has no quality snapshot; applyQuality() must run first');
+    }
+
+    const { snapshot, issues } = this.qualityPresets.resolveFromCustom({
+      width: input.width ?? current.width,
+      height: input.height ?? current.height,
+      frameRate: input.frameRate ?? current.frameRate,
+      bitrateMin: input.bitrateMin !== undefined ? input.bitrateMin : current.bitrateMin,
+      bitrateMax: input.bitrateMax !== undefined ? input.bitrateMax : current.bitrateMax,
+      // 快照中已有值，保持不变
+      optimizationMode: current.optimizationMode,
+      codec: current.codec,
+    });
+
+    const rejecting = issues.filter((issue) => issue.severity === 'reject');
+    if (rejecting.length > 0) {
+      throw new HttpException(
+        { message: rejecting.map((issue) => issue.message).join('；'), code: 'QUALITY_INVALID' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const now = Date.now();
+    // 切分区间：旧档位在此刻收口，新档位从此刻开始。
+    // ⚠️ pause 会把在场观众的 billingStartedAt 置空，因此必须先 resume 重新起表，
+    //    再开区间 —— 否则 openAllViewerIntervals 会认为「没有人在计费」而什么都不开。
+    this.pauseViewerBilling(session.id, now, 'tier_change');
+    this.writeQualitySnapshot(sessionId, snapshot);
+    this.resumeViewerBilling(session.id, now);
+    this.openAllViewerIntervals(this.getById(sessionId)!, now);
+
+    this.logger.log(
+      `updateQualityLive: session=${sessionId} -> ` +
+        `${snapshot.width}x${snapshot.height}@${snapshot.frameRate} tier=${snapshot.tier}`,
+    );
+    return snapshot;
   }
 
   private readQualitySnapshot(sessionId: string): QualitySnapshot | null {

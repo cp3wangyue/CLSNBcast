@@ -238,5 +238,37 @@ export function useScreenShare(token: string, onTrackEnded?: () => void) {
     setIsSharing(false);
   }, []);
 
-  return { isSharing, error, publish, stop, setLocalPreviewContainer };
+  /**
+   * 共享开始后动态切换编码参数（分辨率 / 帧率 / 码率），**不重建 Session**。
+   *
+   * ⚠️ `optimizationMode` 与 `codec` 不能用它切换：
+   * - `optimizationMode` 不是 `VideoEncoderConfiguration` 的字段，只在创建 track 时生效；
+   * - `codec` 是 client 级参数，改动必须 leave → 重建 client → join → publish，会中断观众画面。
+   */
+  const setEncoderConfig = useCallback(
+    async (config: VideoEncoderConfiguration): Promise<{ success: boolean; message?: string }> => {
+      const track = screenVideoRef.current;
+      if (!track) {
+        return { success: false, message: '当前没有进行中的共享' };
+      }
+      try {
+        await track.setEncoderConfiguration(config);
+        return { success: true };
+      } catch (e: any) {
+        const message = e?.message || String(e);
+        setError(message);
+        return { success: false, message };
+      }
+    },
+    [],
+  );
+
+  return {
+    isSharing,
+    error,
+    publish,
+    stop,
+    setLocalPreviewContainer,
+    setEncoderConfig,
+  };
 }

@@ -355,6 +355,93 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
 
   // ===== 画质快照（3-2）=====
 
+  // ===== 运行中动态切换（3-4）=====
+
+  describe('updateQualityLive', () => {
+    /** 建一个已在共享、带快照、并有观众在计费的会话。 */
+    function startActiveWithSnapshot(presetId = '1080p_2') {
+      const session = createPendingSession();
+      sessions.applyQuality(session.id, { presetId });
+      sessions.startSharing(session.token, 'client-1', false);
+      sessions.viewerConnected(session.id, 'v1');
+      return sessions.getById(session.id)!;
+    }
+
+    it('切换分辨率并更新快照', () => {
+      const session = startActiveWithSnapshot();
+
+      const next = sessions.updateQualityLive(session.id, { width: 1280, height: 720 });
+
+      expect(next.width).toBe(1280);
+      expect(next.height).toBe(720);
+      expect(next.tier).toBe('HD 高清');
+      expect(sessions.getQualitySnapshot(session.id)!.tier).toBe('HD 高清');
+    });
+
+    it('只传部分参数时其余保持不变', () => {
+      const session = startActiveWithSnapshot();
+
+      const next = sessions.updateQualityLive(session.id, { frameRate: 60 });
+
+      expect(next.width).toBe(1920);
+      expect(next.height).toBe(1080);
+      expect(next.frameRate).toBe(60);
+    });
+
+    it('🔑 切换会切分账本区间（旧档位收口 + 新档位开始）', () => {
+      const session = startActiveWithSnapshot();
+      expect(ledger.listSessionIntervals(session.id).filter((i) => i.role === 'viewer')).toHaveLength(1);
+
+      sessions.updateQualityLive(session.id, { width: 1280, height: 720 });
+
+      const viewerIntervals = ledger.listSessionIntervals(session.id)
+        .filter((i) => i.role === 'viewer');
+      expect(viewerIntervals).toHaveLength(2);
+      expect(viewerIntervals[0].closedReason).toBe('tier_change');
+      expect(viewerIntervals[0].tier).toBe('Full HD 全高清');
+      expect(viewerIntervals[1].tier).toBe('HD 高清');
+      expect(viewerIntervals[1].endedAt).toBeNull();
+    });
+
+    it('🔒 非法参数被拒（奇数宽度）', () => {
+      const session = startActiveWithSnapshot();
+
+      expect(() => sessions.updateQualityLive(session.id, { width: 1921 })).toThrow();
+      // 快照未被破坏
+      expect(sessions.getQualitySnapshot(session.id)!.width).toBe(1920);
+    });
+
+    it('🔒 没有快照时抛错（必须先 applyQuality）', () => {
+      const session = createPendingSession();
+      sessions.startSharing(session.token, 'client-1', false);
+
+      expect(() => sessions.updateQualityLive(session.id, { width: 1280 })).toThrow(/no quality snapshot/);
+    });
+
+    it('优化模式与编码格式在切换后保持原值（不支持运行中切换）', () => {
+      const session = startActiveWithSnapshot();
+
+      const next = sessions.updateQualityLive(session.id, { width: 1280, height: 720 });
+
+      expect(next.optimizationMode).toBe('motion');
+      expect(next.codec).toBe('h264');
+    });
+
+    it('主播区间不会被切换打断（主播口径覆盖整个会话）', () => {
+      const session = startActiveWithSnapshot();
+      const before = ledger.listSessionIntervals(session.id)
+        .filter((i) => i.role === 'publisher');
+      expect(before).toHaveLength(1);
+
+      sessions.updateQualityLive(session.id, { width: 1280, height: 720 });
+
+      const after = ledger.listSessionIntervals(session.id)
+        .filter((i) => i.role === 'publisher');
+      expect(after).toHaveLength(1);
+      expect(after[0].endedAt).toBeNull();
+    });
+  });
+
   describe('applyQuality', () => {
     it('预设 → 写入快照，并带上档位', () => {
       const session = createPendingSession();

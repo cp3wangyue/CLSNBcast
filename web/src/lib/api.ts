@@ -224,6 +224,24 @@ export const api = {
     });
   },
 
+  /** 共享进行中动态切换编码参数（分辨率 / 帧率 / 码率）。
+   *  optimizationMode 与 codec 不支持运行中切换。 */
+  updateLiveQuality(
+    token: string,
+    input: {
+      width?: number;
+      height?: number;
+      frameRate?: number;
+      bitrateMin?: number | null;
+      bitrateMax?: number | null;
+    },
+  ): Promise<{ ok: boolean; message?: string; quality?: QualitySnapshot }> {
+    return request('/api/share/quality?t=' + encodeURIComponent(token), {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
   /** 发布端停止共享（替代原 WebSocket sharing_stopped） */
   stopSharing(token: string): Promise<{ ok: boolean }> {
     return request('/api/share/stop?t=' + encodeURIComponent(token), {

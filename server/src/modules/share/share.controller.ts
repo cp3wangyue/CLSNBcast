@@ -142,6 +142,28 @@ export class ShareController {
     };
   }
 
+  /**
+   * 共享进行中动态切换编码参数（分辨率 / 帧率 / 码率）。
+   *
+   * ⚠️ `optimizationMode` 与 `codec` **不接受**：前者不是 `VideoEncoderConfiguration`
+   * 的字段，后者是 client 级参数，运行中切换会中断观众画面。
+   */
+  @Post('quality')
+  @UseGuards(ShareTokenGuard)
+  updateQualityLive(
+    @Req() req: any,
+    @Body('width') width?: number,
+    @Body('height') height?: number,
+    @Body('frameRate') frameRate?: number,
+    @Body('bitrateMin') bitrateMin?: number | null,
+    @Body('bitrateMax') bitrateMax?: number | null,
+  ) {
+    const snapshot = this.sessionService.updateQualityLive(req.session.id, {
+      width, height, frameRate, bitrateMin, bitrateMax,
+    });
+    return { ok: true, quality: snapshot };
+  }
+
   @Post('stop')
   @UseGuards(ShareTokenGuard)
   stop(@Req() req: any) {
