@@ -441,7 +441,10 @@ npm run verify        # = typecheck + build + test
   - [x] 重写 `DEPLOY.md`：HTTPS、证书、备份/恢复、升级、运维命令、Nginx 备选
   - [x] `.env.example` 补全（`SECRET_ENCRYPTION_KEY`、`KOOK_BOT_TOKEN`、`DOMAIN`、
         `DATA_DIR`、`TRUST_PROXY`、`PORT`）
-  - [ ] `deploy.sh` 仍带硬编码默认值（`SSH_HOST=rainyun`）—— 纯运维脚本优化，不影响功能
+  - [x] `deploy.sh` 不再内置机器专属默认值：`SSH_HOST` 改为**必填**（支持环境变量或首个位置参数），
+      缺失时脚本在**本地构建之前**就报错退出，不再先跑完 build 才在上传阶段失败；
+      新增可选 `SSH_PORT`（集中组装 `ssh -p` / `scp -P`，并校验为数字）与 `-h/--help`。
+      `REMOTE_DIR` / `SERVICE` 保留默认值——它们跟随项目本身而非某台机器，且原本就可用环境变量覆盖
 
 ### 验收
 

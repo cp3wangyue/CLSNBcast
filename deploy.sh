@@ -1,10 +1,53 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SSH_HOST="${SSH_HOST:-rainyun}"
+# 部署目标不内置任何机器专属默认值：SSH_HOST 是必填项，
+# 脚本开头即校验，避免先跑完本地 build 才在上传阶段失败。
+#
+#   SSH_HOST=user@host        必填，也可以是 ~/.ssh/config 里的 Host 别名
+#   SSH_PORT=                 可选；留空则沿用 ssh 的默认端口与 ~/.ssh/config 里的 Port
+#   REMOTE_DIR=/root/clsnbcast
+#   SERVICE=clsnbcast         docker-compose.yml 里的服务名
+#   HEALTH_TIMEOUT=120        等待 healthy 的秒数
+
+usage() {
+  cat >&2 <<'USAGE'
+用法：
+  SSH_HOST=user@host ./deploy.sh
+  ./deploy.sh user@host
+
+可选环境变量：SSH_PORT / REMOTE_DIR / SERVICE / HEALTH_TIMEOUT
+USAGE
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+SSH_HOST="${SSH_HOST:-${1:-}}"
+SSH_PORT="${SSH_PORT:-}"
 REMOTE_DIR="${REMOTE_DIR:-/root/clsnbcast}"
 SERVICE="${SERVICE:-clsnbcast}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
+
+if [[ -z "$SSH_HOST" ]]; then
+  echo "错误：未指定部署目标（脚本内没有内置主机名）。" >&2
+  usage
+  exit 1
+fi
+
+# scp 用大写 -P 指定端口，ssh 用小写 -p；两者不一致，集中在这里组装一次。
+SSH_CMD=(ssh)
+SCP_CMD=(scp)
+if [[ -n "$SSH_PORT" ]]; then
+  if [[ ! "$SSH_PORT" =~ ^[0-9]+$ ]]; then
+    echo "错误：SSH_PORT 必须是端口号，当前为 '$SSH_PORT'。" >&2
+    exit 1
+  fi
+  SSH_CMD+=(-p "$SSH_PORT")
+  SCP_CMD+=(-P "$SSH_PORT")
+fi
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ARCHIVE_NAME="clsnbcast-deploy-$$.tar.gz"
@@ -34,11 +77,11 @@ tar -czf "$LOCAL_ARCHIVE" \
   web/dist
 
 echo "[3/5] 上传到 ${SSH_HOST}:${REMOTE_DIR}"
-ssh "$SSH_HOST" "mkdir -p '$REMOTE_DIR'"
-scp "$LOCAL_ARCHIVE" "${SSH_HOST}:${REMOTE_DIR}/${ARCHIVE_NAME}"
+"${SSH_CMD[@]}" "$SSH_HOST" "mkdir -p '$REMOTE_DIR'"
+"${SCP_CMD[@]}" "$LOCAL_ARCHIVE" "${SSH_HOST}:${REMOTE_DIR}/${ARCHIVE_NAME}"
 
 echo "[4/5] 替换 dist，构建镜像并滚动更新容器"
-ssh "$SSH_HOST" bash -s -- "$REMOTE_DIR" "$ARCHIVE_NAME" "$SERVICE" <<'REMOTE_SCRIPT'
+"${SSH_CMD[@]}" "$SSH_HOST" bash -s -- "$REMOTE_DIR" "$ARCHIVE_NAME" "$SERVICE" <<'REMOTE_SCRIPT'
 set -Eeuo pipefail
 
 REMOTE_DIR="$1"
@@ -91,20 +134,20 @@ echo "[5/5] 等待服务健康"
 deadline=$((SECONDS + HEALTH_TIMEOUT))
 while (( SECONDS < deadline )); do
   container_id="$(
-    ssh "$SSH_HOST" \
+    "${SSH_CMD[@]}" "$SSH_HOST" \
       "cd '$REMOTE_DIR' && docker compose ps -q '$SERVICE'" |
       tr -d '\r'
   )"
 
   if [[ -n "$container_id" ]]; then
     health="$(
-      ssh "$SSH_HOST" \
+      "${SSH_CMD[@]}" "$SSH_HOST" \
         "docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' '$container_id'" |
         tr -d '\r'
     )"
 
     if [[ "$health" == "healthy" ]]; then
-      ssh "$SSH_HOST" "cd '$REMOTE_DIR' && docker compose ps"
+      "${SSH_CMD[@]}" "$SSH_HOST" "cd '$REMOTE_DIR' && docker compose ps"
       echo "部署完成：${SERVICE} 已通过健康检查。"
       exit 0
     fi
@@ -122,5 +165,5 @@ while (( SECONDS < deadline )); do
 done
 
 echo "部署未在 ${HEALTH_TIMEOUT} 秒内变为 healthy，最近日志如下：" >&2
-ssh "$SSH_HOST" "cd '$REMOTE_DIR' && docker compose ps -a && docker compose logs --tail=100 '$SERVICE'" >&2
+"${SSH_CMD[@]}" "$SSH_HOST" "cd '$REMOTE_DIR' && docker compose ps -a && docker compose logs --tail=100 '$SERVICE'" >&2
 exit 1

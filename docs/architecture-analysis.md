@@ -230,7 +230,7 @@ if (!sessCols.some(c => c.name === 'low_latency')) {
 | `Dockerfile` | 运行时镜像。`node:20.19-alpine`，只装 server 生产依赖 + 重编译 `better-sqlite3`，**拷贝预构建的 `server/dist` 和 `web/dist`**（镜像内不构建）。`VOLUME /app/data`、`EXPOSE 3520`、`HEALTHCHECK wget -q -O /dev/null http://localhost:3520/` |
 | `docker-compose.yml` | 单服务 `clsnbcast`。端口 `127.0.0.1:${PORT:-3520}:3520`（**仅回环，期望前面有反代**）、命名卷 `clsnbcast-data:/app/data`、`env_file: .env`、healthcheck、日志轮转 10m×3 |
 | `DEPLOY.md` | 手工 nginx 说明（`listen 80`、`proxy_pass 127.0.0.1:3520`、**SSE 必需的 `proxy_buffering off` 与长超时**、`client_max_body_size 1m`） |
-| `deploy.sh` | 本地 build → tar → scp → 远端 `docker compose build --pull && up -d` → 轮询健康。**默认值硬编码** `SSH_HOST=rainyun`、`REMOTE_DIR=/root/clsnbcast` |
+| `deploy.sh` | 本地 build → tar → scp → 远端 `docker compose build --pull && up -d` → 轮询健康。部署目标无内置机器专属默认值：`SSH_HOST` 必填（环境变量或首个位置参数，缺失时在**构建前**失败），`REMOTE_DIR` / `SERVICE` / `HEALTH_TIMEOUT` / `SSH_PORT` 可选 |
 
 **缺口**：compose 里没有 HTTPS/反代服务（只写在文档里）；`.env.example` 未记录代码实际读取的 `KOOK_BOT_TOKEN`、`LEGACY_ADMIN_SUNSET_AT`；`main.ts` 没有 `app.set('trust proxy', ...)`，在 nginx 后面 `req.ip` 会退化成代理 IP，**使登录/绑定接口的按 IP 限流失效**（`main.ts:93`）。
 

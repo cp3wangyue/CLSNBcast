@@ -93,6 +93,34 @@ docker compose ps
 docker compose logs -f
 ```
 
+### 用 deploy.sh 一键部署
+
+在项目根目录执行（本地构建 → 打包 dist → 上传 → 远端重建容器 → 等待健康）：
+
+```bash
+SSH_HOST=user@your-server ./deploy.sh
+# 或把主机作为第一个参数
+./deploy.sh user@your-server
+```
+
+部署目标**没有内置默认值**，`SSH_HOST` 必填；若缺失，脚本会在本地构建之前就报错退出。
+可选环境变量：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SSH_HOST` | 无（必填） | 目标主机，也可以是 `~/.ssh/config` 里的 Host 别名 |
+| `SSH_PORT` | 沿用 ssh 默认 | 非标准 SSH 端口时指定 |
+| `REMOTE_DIR` | `/root/clsnbcast` | 远端部署目录 |
+| `SERVICE` | `clsnbcast` | compose 服务名 |
+| `HEALTH_TIMEOUT` | `120` | 等待变为 healthy 的秒数 |
+
+远端 `.env` 必须事先存在（脚本会在远端校验，缺失即中止），`.env` 与数据卷都不会被覆盖。
+
+> **Windows 用户**：部署脚本与它打包上传的文件通过 `.gitattributes` 固定为 LF 行尾。
+> 不要在开启 `core.autocrlf` 的情况下绕过该配置改动 `deploy.sh` —— 脚本第 4 步会把一段
+> 脚本经 ssh 交给远端 Linux bash，CRLF 会让远端的每一行都因尾随 `\r` 而解析失败。
+> 若已出现该问题，在 WSL 或 Linux 下执行部署即可。
+
 ---
 
 ## 4. 初始化配置
