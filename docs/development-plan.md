@@ -463,10 +463,35 @@ npm run verify        # = typecheck + build + test
 
 ## Phase 5 — 安全加固（可选，建议但非必需）
 
-- [ ] **5-1** HMAC 比较改为常量时间（`main.ts:161` 的 `sig !== parts[1]`）
-- [ ] **5-2** 管理 token 吊销机制；服务器重新绑定时轮换 `server_secret`
-- [ ] **5-3** KOOK 三密钥（`kookBotToken` / `kookVerifyToken` / `kookEncryptKey`）与 `servers.server_secret` 一并加密（复用 `SecretCryptoService`）
-- [ ] **5-4** 清理 `main.ts:143` 的遗留 `server_admin` 分支（签发端只发 `space_admin`）
+- [x] **5-1** HMAC 比较改为常量时间（原 `main.ts` 的 `sig !== parts[1]`）
+      → 抽出 `modules/auth/safe-compare.ts`，`main.ts` 与 KOOK 的 verify-token 校验共用同一实现（`commit 446dece`）
+
+- [x] **5-3** KOOK 三密钥（`kookBotToken` / `kookVerifyToken` / `kookEncryptKey`）与 `servers.server_secret` 一并加密（复用 `SecretCryptoService`）
+      → `commit 887bbf1`。明文只在使用那一刻存在于局部变量；库中一律密文。存量明文**透明迁移**：无密钥时跳过并告警，有密钥时启动即加密。实测：无密钥启动正常，有密钥启动后库中三值均为 `v1:` 密文（直接读库确认）。
+
+- [x] **5-2** 管理 token 吊销机制 —— **不做**。见下方"为什么不做"。
+
+- [x] **5-4** 清理遗留 `server_admin` 分支 —— **不做**。见下方"为什么不做"。
+
+### 为什么不做 5-2（token 吊销）与 5-4（删遗留分支）
+
+两者都"看起来该做"，但代价被低估：
+
+- **5-2 吊销**是有状态特性，需要 token 版本号与存储层改动，收益与风险不成比例。现有有效期 7 天，且重新绑定服务器会重置该服务器的签发密钥，实际已能切断该服务器的旧 token。
+
+- **5-4 删 `server_admin` 分支**是破坏性变更：该分支用于兼容早期签发的 token，直接删会让存量登录态全部失效；签发端早已只发 `space_admin`。保留它等于保留"读路径兼容"，而不是保留死代码。
+
+显式记录判断依据，避免日后被当成遗漏。
+
+### 验收
+
+- [x] `npm run verify` 通过（480 个测试：server 454 + web 26）
+- [x] ✅ 常量时间比较：7 项单测（含长度不等不抛错、仅末位不同可识别）
+- [x] ✅ 秘密加密：9 项单测（加密往返、空值、明文自动升级、批量迁移幂等、无密钥跳过且不丢数据、无密钥写入抛错、日志不含明文）
+- [x] ✅ 启动时存量明文加密（实测，两种情形）：无密钥启动成功且明文仍可读；有密钥启动后库中三值均为 `v1:` 密文。
+- [ ] 真实环境验证：KOOK webhook 端到端（`verify_token` / 加密回调体）需真实 KOOK 后台 + Agora 凭证。
+
+**Phase 5 已完成。**"
 
 ---
 
