@@ -8,7 +8,6 @@ import {
   setSpaceAdminToken,
 } from '../lib/api';
 import { cn } from '../lib/utils';
-import { QUALITY_OPTIONS } from '../hooks/useScreenShare';
 import { ProviderManager } from '../components/providers/ProviderManager';
 import type { AgoraProvider } from '../types';
 import { NoticeBanners, NoticeProvider } from '../components/notices/NoticeCenter';
@@ -375,11 +374,11 @@ function ServerConfigPanel({ serverId }: { serverId: string }) {
         <div className="pt-2 border-t border-white/5">
           <label className="text-xs text-muted mb-2 block">允许的画质</label>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            {QUALITY_OPTIONS.map((q: any) => {
-              const checked = (config.allowedQualities || []).includes(q.key);
+            {(config.qualityPresets ?? []).map((q: any) => {
+              const checked = (config.allowedQualities || []).includes(q.id);
               return (
                 <label
-                  key={q.key}
+                  key={q.id}
                   className={cn(
                     'flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors text-sm',
                     checked
@@ -392,9 +391,9 @@ function ServerConfigPanel({ serverId }: { serverId: string }) {
                     checked={checked}
                     onChange={(e) => {
                       const next = e.target.checked
-                        ? [...(config.allowedQualities || []), q.key]
-                        : (config.allowedQualities || []).filter((k: string) => k !== q.key);
-                      update(['allowedQualities'], next.length > 0 ? next : [q.key]);
+                        ? [...(config.allowedQualities || []), q.id]
+                        : (config.allowedQualities || []).filter((k: string) => k !== q.id);
+                      update(['allowedQualities'], next.length > 0 ? next : [q.id]);
                     }}
                     className="accent-brand"
                   />

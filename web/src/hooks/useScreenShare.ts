@@ -22,57 +22,6 @@ export interface PublishResult {
   message?: string;
 }
 
-export interface QualityOption {
-  key: string;
-  label: string;
-  encoderConfig: {
-    width: number;
-    height: number;
-    frameRate: number;
-    bitrateMin?: number;
-    bitrateMax?: number;
-  };
-}
-
-/** 7 种画质选项，与后端 QUALITY_PRESETS 对应 */
-export const QUALITY_OPTIONS: QualityOption[] = [
-  {
-    key: '480p_2',
-    label: '480P 30fps',
-    encoderConfig: { width: 640, height: 480, frameRate: 30, bitrateMin: 400, bitrateMax: 1000 },
-  },
-  {
-    key: '720p30',
-    label: '720P 30fps',
-    encoderConfig: { width: 1280, height: 720, frameRate: 30, bitrateMin: 1000, bitrateMax: 3000 },
-  },
-  {
-    key: '1080p_2',
-    label: '1080P 30fps',
-    encoderConfig: { width: 1920, height: 1080, frameRate: 30, bitrateMin: 2000 },
-  },
-  {
-    key: '1080p60',
-    label: '1080P 60fps',
-    encoderConfig: { width: 1920, height: 1080, frameRate: 60, bitrateMin: 2000 },
-  },
-  {
-    key: '1440p30',
-    label: '2K 30fps',
-    encoderConfig: { width: 2560, height: 1440, frameRate: 30, bitrateMin: 2000 },
-  },
-  {
-    key: '1440p60',
-    label: '2K 60fps',
-    encoderConfig: { width: 2560, height: 1440, frameRate: 60, bitrateMin: 2000 },
-  },
-  {
-    key: '4k30',
-    label: '4K 30fps',
-    encoderConfig: { width: 3840, height: 2160, frameRate: 30, bitrateMin: 2000 },
-  },
-];
-
 export function useScreenShare(token: string, onTrackEnded?: () => void) {
   const clientRef = useRef<IAgoraRTCClient | null>(null);
   const screenVideoRef = useRef<ILocalVideoTrack | null>(null);
