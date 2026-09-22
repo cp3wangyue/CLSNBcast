@@ -1,8 +1,10 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { createDecipheriv, createHash, timingSafeEqual } from 'crypto';
+import { createDecipheriv } from 'crypto';
+import { safeEqual } from '../auth/safe-compare';
 import { inflateRawSync, inflateSync } from 'zlib';
 import { DatabaseService } from '../database/database.service';
 import { KookWebhookEnvelope } from './kook-event.types';
+import { SecretCryptoService } from '../crypto/secret-crypto.service';
 
 export class KookWebhookProtocolError extends Error {
   constructor(readonly status: number, readonly code: string) {
@@ -15,11 +17,16 @@ export class KookWebhookProtocolError extends Error {
 export class KookWebhookCodec {
   private readonly maxBodyBytes = 1024 * 1024;
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly crypto: SecretCryptoService,
+  ) {}
 
   decode(raw: Buffer): KookWebhookEnvelope {
-    const config = this.db.getGlobalConfig();
-    if (!config.kookVerifyToken || !config.kookEncryptKey) {
+    // 秘密在库中加密存储，只在这里解密后使用；明文不写日志、不进响应、不返回前端
+    const expectedVerifyToken = this.crypto.getGlobalSecret('kookVerifyToken');
+    const encryptKey = this.crypto.getGlobalSecret('kookEncryptKey');
+    if (!expectedVerifyToken || !encryptKey) {
       throw new KookWebhookProtocolError(HttpStatus.SERVICE_UNAVAILABLE, 'webhook_not_configured');
     }
     if (!Buffer.isBuffer(raw) || raw.length === 0) {
@@ -31,14 +38,17 @@ export class KookWebhookCodec {
 
     const outer = this.parseJsonWithCompressionFallback(raw);
     const decoded = typeof outer?.encrypt === 'string'
-      ? this.decryptEnvelope(outer.encrypt, config.kookEncryptKey)
+      ? this.decryptEnvelope(outer.encrypt, encryptKey)
       : outer;
     if (!decoded || typeof decoded !== 'object' || decoded.s !== 0 || !this.isRecord(decoded.d)) {
       throw new KookWebhookProtocolError(HttpStatus.BAD_REQUEST, 'invalid_envelope');
     }
 
-    const verifyToken = decoded.d.verify_token;
-    if (typeof verifyToken !== 'string' || !this.secureEqual(verifyToken, config.kookVerifyToken)) {
+    const actualVerifyToken = decoded.d.verify_token;
+    if (
+      typeof actualVerifyToken !== 'string' ||
+      !this.secureEqual(actualVerifyToken, expectedVerifyToken)
+    ) {
       throw new KookWebhookProtocolError(HttpStatus.UNAUTHORIZED, 'invalid_verify_token');
     }
 
@@ -101,9 +111,7 @@ export class KookWebhookCodec {
   }
 
   private secureEqual(actual: string, expected: string): boolean {
-    const actualHash = createHash('sha256').update(actual, 'utf8').digest();
-    const expectedHash = createHash('sha256').update(expected, 'utf8').digest();
-    return timingSafeEqual(actualHash, expectedHash);
+    return safeEqual(actual, expected);
   }
 
   private isRecord(value: unknown): value is Record<string, any> {
