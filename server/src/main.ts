@@ -12,12 +12,18 @@ import * as bodyParser from 'body-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { DatabaseService } from './modules/database/database.service';
+import { installLogScrubber } from './modules/logging/log-scrubber';
 
 const SUPER_SECRET = process.env.SUPER_ADMIN_PASSWORD;
 if (!SUPER_SECRET) {
+  // 只提示变量名，绝不回显值
   console.error('FATAL: SUPER_ADMIN_PASSWORD environment variable is required');
   process.exit(1);
 }
+
+// 尽早安装日志脱敏：早于任何可能打印秘密的业务代码。
+// 位置必须在 import 之后 —— import 会被提升，放到 import 之前会访问尚未初始化的模块绑定。
+installLogScrubber();
 
 // ===== 简易内存速率限制器 =====
 interface RateLimitEntry {
@@ -72,6 +78,13 @@ async function bootstrap() {
   app.use(bodyParser.urlencoded({ extended: false, limit: '1mb' }));
   // 显式限制 JSON 请求体大小
   app.use(bodyParser.json({ limit: '1mb' }));
+
+  // 生产环境在反向代理之后运行：不开启 trust proxy 的话 req.ip 会一律是代理地址，
+  // 登录/绑定接口的按 IP 限流会因此失效（所有人共用一个“IP”）。
+  // 只信任一跳私有网络代理（Caddy / nginx 与本机直连），不盲目信任外部 X-Forwarded-For。
+  if (process.env.TRUST_PROXY !== 'false') {
+    app.set('trust proxy', 1);
+  }
 
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim())
