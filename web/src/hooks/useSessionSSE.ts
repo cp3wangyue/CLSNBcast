@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { SessionStatus } from '../types';
+import type { SessionStatus, CustomQualityInput, QualitySnapshot, QualityIssue } from '../types';
 import { api } from '../lib/api';
 
 interface SessionState {
@@ -113,9 +113,15 @@ export function useSessionSSE(token: string, role: 'publisher' | 'viewer') {
       quality?: string,
       clientId?: string,
       lowLatency?: boolean,
-    ): Promise<{ ok: boolean }> => {
+      customQuality?: CustomQualityInput,
+    ): Promise<{
+      ok: boolean;
+      message?: string;
+      quality?: QualitySnapshot;
+      warnings?: QualityIssue[];
+    }> => {
       try {
-        const resp = await api.startSharing(token, quality, clientId, lowLatency);
+        const resp = await api.startSharing(token, quality, clientId, lowLatency, customQuality);
         return resp;
       } catch (e: any) {
         console.error('startSharing fetch error:', e);

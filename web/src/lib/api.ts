@@ -5,6 +5,11 @@ import type {
   AgoraProviderFormInput,
   UsageDashboard,
   SessionUsageDetail,
+  QualityPresetOption,
+  QualitySnapshot,
+  CustomQualityInput,
+  QualityIssue,
+  QualityLimits,
 } from '../types';
 
 const SUPER_TOKEN_KEY = 'clsnbcast_super_token';
@@ -204,16 +209,18 @@ export const api = {
     );
   },
 
-  /** 发布端开始共享（替代原 WebSocket sharing_started） */
+  /** 发布端开始共享（替代原 WebSocket sharing_started）。
+   *  `customQuality` 传入时走自定义画质，否则用 `quality`（预设 id）。 */
   startSharing(
     token: string,
     quality?: string,
     clientId?: string,
     lowLatency?: boolean,
-  ): Promise<{ ok: boolean }> {
+    customQuality?: CustomQualityInput,
+  ): Promise<{ ok: boolean; message?: string; quality?: QualitySnapshot; warnings?: QualityIssue[] }> {
     return request('/api/share/start?t=' + encodeURIComponent(token), {
       method: 'POST',
-      body: JSON.stringify({ quality, clientId, lowLatency }),
+      body: JSON.stringify({ quality, clientId, lowLatency, customQuality }),
     });
   },
 

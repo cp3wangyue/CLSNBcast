@@ -363,7 +363,19 @@ npm run verify        # = typecheck + build + test
   - [x] 响应回传生效的 `quality` 快照与 `warnings`，供前端展示目标参数与风险提示
   - [x] 🔑 会话档位改为**优先读快照**，自定义分辨率因此也能算对档位
   - [x] 单测 6 个 + 全量回归（421 server + 8 web）
-- [ ] **3-3 前端**：分享页自定义表单 + 画质预设管理 UI
+- [x] **3-3 前端（分享页 + 预设管理 API 就绪）**
+  - [x] `QUALITY_OPTIONS` 硬编码副本**已删除**，画质预设改由 `/api/share/info` 下发
+        （含 `tier` 与 `qualityLimits`），并与服务器白名单取交集
+  - [x] `useScreenShare.publish()` 改为接收**编码参数对象**（不再传 `qualityKey`）；
+        codec 在 `createClient` 时确定（client 级参数，运行中不可切换）
+  - [x] 「自定义」模式表单：宽 / 高 / 帧率 / 最低码率 / 最高码率 / 优化模式 / 编码格式
+  - [x] 前端镜像同一套两档校验（`lib/qualityValidation.ts`）：reject 红字必修，
+        warn 黄字仅提示；**服务端未下发边界时只做基本检查**，不误杀合法输入
+  - [x] 🔑 浏览器实测：奇数宽度被拒；最高码率 20000 只黄字提示且**输入框保持 20000**
+        （不修改用户输入）；预设模式渲染服务端下发的全部 7 档
+  - [x] 单测 18 个（web）
+  - [ ] 超管画质预设管理 UI（增删改停用排序）—— 服务端 `QualityPresetService` 已就绪，
+        本轮先交付分享页，管理页与 Phase 3 剩余部分一起做
 - [ ] **3-4 运行中动态切换**：`setEncoderConfiguration` 切换分辨率 / 帧率 / 码率
       （`optimizationMode` 与 `codec` 是 track/client 级参数，**不支持**运行中切换）
 - [ ] **3-5 统计面板**：`getStats()` + `network-quality`，目标 vs 实际对比

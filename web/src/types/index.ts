@@ -35,6 +35,10 @@ export interface SessionInfo {
   lowLatency?: boolean;
   /** 服务器是否允许开启低延迟模式 */
   allowLowLatency?: boolean;
+  /** 服务端下发的画质预设（自由画质；替代前端硬编码档位表） */
+  qualityPresets?: QualityPresetOption[];
+  /** 自定义画质的参数边界，供前端做同样的两档校验 */
+  qualityLimits?: QualityLimits;
 }
 
 export interface AgoraTokenResponse {
@@ -170,4 +174,86 @@ export interface AgoraProviderFormInput {
   monthlyQuotaStandardMinutes?: number | null;
   quotaEnforced?: boolean;
   note?: string;
+}
+
+// ===== Quality（自由画质）=====
+
+/** Agora `VideoEncoderConfiguration` 的字段子集（Web SDK 可用的就这六个）。 */
+export interface VideoEncoderConfiguration {
+  width?: number;
+  height?: number;
+  frameRate?: number;
+  /** Kbps */
+  bitrateMin?: number;
+  /** Kbps */
+  bitrateMax?: number;
+  scaleResolutionDownBy?: number;
+}
+
+export type QualityOptimizationMode = 'motion' | 'detail';
+export type QualityCodec = 'h264' | 'vp8' | 'vp9';
+
+/**
+ * 服务端下发的画质预设。
+ *
+ * 用它替代原先前端硬编码的 `QUALITY_OPTIONS` —— 那份副本必须与后端
+ * `QUALITY_PRESETS` 手工保持同步，是长期的双份真相来源。
+ */
+export interface QualityPresetOption {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+  frameRate: number;
+  /** null = 不向 Agora 传递该项 */
+  bitrateMin: number | null;
+  bitrateMax: number | null;
+  optimizationMode: QualityOptimizationMode;
+  codec: QualityCodec;
+  enabled: boolean;
+  sortOrder: number;
+  /** 服务端按分辨率推导的计费档位（展示用） */
+  tier?: string;
+}
+
+/** 生效的画质参数快照。 */
+export interface QualitySnapshot {
+  source: 'preset' | 'custom';
+  presetId: string | null;
+  width: number;
+  height: number;
+  frameRate: number;
+  bitrateMin: number | null;
+  bitrateMax: number | null;
+  optimizationMode: QualityOptimizationMode;
+  codec: QualityCodec;
+  tier: string;
+}
+
+/** 自定义画质入参。 */
+export interface CustomQualityInput {
+  width: number;
+  height: number;
+  frameRate: number;
+  bitrateMin?: number | null;
+  bitrateMax?: number | null;
+  optimizationMode?: QualityOptimizationMode;
+  codec?: QualityCodec;
+}
+
+/** 参数校验提示。`reject` 必须修正；`warn` 只是风险提示，不拦截。 */
+export interface QualityIssue {
+  field: string;
+  severity: 'reject' | 'warn';
+  code: string;
+  message: string;
+}
+
+/** 自定义画质的参数边界，由服务端下发（前端用它做同样的两档校验）。 */
+export interface QualityLimits {
+  width: { min: number; max: number; step: number };
+  height: { min: number; max: number; step: number };
+  frameRate: { min: number; max: number; recommendedMin: number; recommendedMax: number };
+  bitrate: { min: number; max: number; recommendedMin: number; recommendedMax: number };
+  maxPixels: number;
 }

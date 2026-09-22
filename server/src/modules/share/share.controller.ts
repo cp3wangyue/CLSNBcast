@@ -15,6 +15,7 @@ import { AgoraService } from '../agora/agora.service';
 import { SessionService } from '../session/session.service';
 import { ProviderUnavailableError } from '../session/session.service';
 import { QualityPresetService } from '../quality/quality-preset.service';
+import { QualityConfigService } from '../quality/quality-config.service';
 import { CustomQualityInput } from '../quality/quality-preset.types';
 import { AgoraRole } from '../agora/agora.types';
 import { DatabaseService } from '../database/database.service';
@@ -28,6 +29,7 @@ export class ShareController {
     private readonly sessionService: SessionService,
     private readonly db: DatabaseService,
     private readonly quality: QualityPresetService,
+    private readonly qualityConfig: QualityConfigService,
   ) {}
 
   @Get('info')
@@ -36,10 +38,28 @@ export class ShareController {
     const info = this.sessionService.toInfo(req.session);
     const serverId = req.session.guildId || '';
     const allowedQualities = this.agora.getAllowedQualities(serverId);
+    const config = this.qualityConfig.get();
     return {
       ...info,
       allowedQualities,
       qualityBitrates: this.db.getGlobalConfig().qualityBitrates,
+      // 画质预设改由服务端下发：消除前端那份必须与后端手工同步的硬编码副本
+      qualityPresets: this.quality.listEnabled().map((preset) => ({
+        id: preset.id,
+        label: preset.label,
+        width: preset.width,
+        height: preset.height,
+        frameRate: preset.frameRate,
+        bitrateMin: preset.bitrateMin,
+        bitrateMax: preset.bitrateMax,
+        optimizationMode: preset.optimizationMode,
+        codec: preset.codec,
+        enabled: preset.enabled,
+        sortOrder: preset.sortOrder,
+        tier: this.qualityConfig.tierRuleFor(preset.width, preset.height).tier,
+      })),
+      // 自定义画质的参数边界，供前端做同样的两档校验（reject / warn）
+      qualityLimits: config.limits,
     };
   }
 

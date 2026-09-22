@@ -6,6 +6,7 @@ import type {
 } from 'agora-rtc-sdk-ng';
 import { api } from '../lib/api';
 import { installScreenAudioInterceptor } from '../lib/screenAudioCapture';
+import type { VideoEncoderConfiguration } from '../types';
 
 const AgoraRTC = (window as any).AgoraRTC;
 AgoraRTC.setLogLevel(2);
@@ -93,12 +94,23 @@ export function useScreenShare(token: string, onTrackEnded?: () => void) {
 
   const publish = useCallback(
     async (opts: {
-      qualityKey?: string;
-      lowLatency: boolean;
-      bitrateConfig?: {
-        bitrateMin?: number;
-        bitrateMax?: number;
+      /**
+       * 编码参数。来自服务端下发的预设，或用户填写的自定义参数。
+       *
+       * 前端不再自带一份画质档位表 —— 那份副本必须与后端 `QUALITY_PRESETS`
+       * 手工同步，是长期的双份真相来源。
+       */
+      encoderConfig: {
+        width: number;
+        height: number;
+        frameRate: number;
+        bitrateMin?: number | null;
+        bitrateMax?: number | null;
+        optimizationMode?: 'motion' | 'detail';
+        codec?: 'h264' | 'vp8' | 'vp9';
+        label?: string;
       };
+      lowLatency: boolean;
     }) => {
       setError('');
       try {
@@ -109,24 +121,31 @@ export function useScreenShare(token: string, onTrackEnded?: () => void) {
         // 1. 先获取 token（不连接服务器）
         const tokenResp = await api.getShareToken(token, 'publisher');
 
-        // 2. 先创建屏幕共享轨道（用户选择窗口）
-        const qKey = opts.qualityKey || '1080p_2';
-        const qOpt = QUALITY_OPTIONS.find((q) => q.key === qKey) || QUALITY_OPTIONS[2];
         const {
-          bitrateMin: _defaultBitrateMin,
-          bitrateMax: _defaultBitrateMax,
-          ...baseEncoderConfig
-        } = qOpt.encoderConfig;
-        // 新版服务端会明确返回该档位的码率对象；空对象表示上下限均不传。
-        // bitrateConfig 缺失时才回退到前端默认值，以兼容尚未升级的服务端。
-        const encoderConfig = opts.bitrateConfig === undefined
-          ? qOpt.encoderConfig
-          : { ...baseEncoderConfig, ...opts.bitrateConfig };
+          width, height, frameRate, bitrateMin, bitrateMax,
+          optimizationMode = 'motion', codec = 'h264',
+        } = opts.encoderConfig;
+
+        // 2. 先创建屏幕共享轨道（用户选择窗口）
+        //    未声明的码率一律不传，由 SDK 与浏览器自行协商。
+        const encoderConfig: VideoEncoderConfiguration = {
+          width,
+          height,
+          frameRate,
+          ...(bitrateMin != null ? { bitrateMin } : {}),
+          ...(bitrateMax != null ? { bitrateMax } : {}),
+        };
+
+        // codec 是 client 级参数，必须在 createClient 时确定，运行中不可切换
+        const client = opts.lowLatency
+          ? AgoraRTC.createClient({ mode: 'rtc', codec })
+          : AgoraRTC.createClient({ mode: 'live', codec });
+
         const screenTrack = await AgoraRTC.createScreenVideoTrack(
           {
             encoderConfig,
             // 两种模式均流畅优先：弱网时允许降低码率或分辨率以尽量保持帧率。
-            optimizationMode: 'motion',
+            optimizationMode,
           },
           // ScreenAudioTrackInitConfig：关 3A 保真多声道 + restrictOwnAudio 防回声
           {
@@ -149,12 +168,9 @@ export function useScreenShare(token: string, onTrackEnded?: () => void) {
         ];
         if (screenAudioRef.current) tracks.push(screenAudioRef.current);
 
-        // 3. 用户已选择窗口，现在连接服务器
-        // 极速直播（默认）：mode:'live' + host 角色，观众端用 audience+level:1，motion 流畅优先
-        // 低延迟模式：mode:'rtc'，超低延时 400-800ms，motion 流畅优先
-        const client = opts.lowLatency
-          ? AgoraRTC.createClient({ mode: 'rtc', codec: 'h264' })
-          : AgoraRTC.createClient({ mode: 'live', codec: 'h264' });
+        // 3. 用户已选择窗口，现在连接服务器。
+        //    极速直播（默认）：mode:'live' + host 角色，观众端用 audience+level:1
+        //    低延迟模式：mode:'rtc'，超低延时 400-800ms
         clientRef.current = client;
 
         // 极速直播共享者必须先切 host 才能 publish

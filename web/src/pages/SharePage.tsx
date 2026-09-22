@@ -1,16 +1,141 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { AlertTriangle, Loader2, Link2, CheckCircle2, Monitor, Zap, ZapOff, Clock } from 'lucide-react';
+import { AlertTriangle, Loader2, Link2, CheckCircle2, Monitor, Zap, ZapOff, Clock, TriangleAlert } from 'lucide-react';
 import { api } from '../lib/api';
 import { useSessionSSE } from '../hooks/useSessionSSE';
-import { useScreenShare, QUALITY_OPTIONS } from '../hooks/useScreenShare';
+import { useScreenShare } from '../hooks/useScreenShare';
 import { copyToClipboard, cn } from '../lib/utils';
-import type { SessionInfo } from '../types';
+import type {
+  SessionInfo,
+  QualityPresetOption,
+  QualitySnapshot,
+  CustomQualityInput,
+  QualityIssue,
+  QualityOptimizationMode,
+  QualityCodec,
+  QualityLimits,
+} from '../types';
+import { validateCustomQuality } from '../lib/qualityValidation';
 import { NoticeBanners } from '../components/notices/NoticeCenter';
 
 // ===== Cookie 工具 =====
 const CID_KEY = 'clsnbcast_cid';
 const ACTIVE_KEY = 'clsnbcast_active';
+
+/** 把表单里的字符串草稿解析成数值入参；空串表示「不传该项」。 */
+function parseCustomDraft(draft: {
+  width: string; height: string; frameRate: string;
+  bitrateMin: string; bitrateMax: string;
+  optimizationMode: QualityOptimizationMode; codec: QualityCodec;
+}): CustomQualityInput {
+  const toInt = (value: string) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : Number.NaN;
+  };
+  return {
+    width: toInt(draft.width),
+    height: toInt(draft.height),
+    frameRate: toInt(draft.frameRate),
+    bitrateMin: draft.bitrateMin.trim() === '' ? null : toInt(draft.bitrateMin),
+    bitrateMax: draft.bitrateMax.trim() === '' ? null : toInt(draft.bitrateMax),
+    optimizationMode: draft.optimizationMode,
+    codec: draft.codec,
+  };
+}
+
+function CustomQualityForm({
+  draft, onChange, disabled, rejections, warnings,
+}: {
+  draft: {
+    width: string; height: string; frameRate: string;
+    bitrateMin: string; bitrateMax: string;
+    optimizationMode: QualityOptimizationMode; codec: QualityCodec;
+  };
+  onChange: (next: {
+    width: string; height: string; frameRate: string;
+    bitrateMin: string; bitrateMax: string;
+    optimizationMode: QualityOptimizationMode; codec: QualityCodec;
+  }) => void;
+  disabled: boolean;
+  rejections: QualityIssue[];
+  warnings: QualityIssue[];
+}) {
+  const set = (key: keyof typeof draft) => (value: string) => onChange({ ...draft, [key]: value });
+  const invalidFields = new Set(rejections.map((issue) => issue.field));
+
+  const field = (key: 'width' | 'height' | 'frameRate' | 'bitrateMin' | 'bitrateMax', label: string, placeholder?: string) => (
+    <label className="block">
+      <span className="text-xs text-muted mb-1 block">{label}</span>
+      <input
+        type="number"
+        value={draft[key]}
+        onChange={(e) => set(key)(e.target.value)}
+        disabled={disabled}
+        placeholder={placeholder}
+        className={cn(
+          'w-full bg-white/5 border rounded-lg px-3 py-2 text-sm disabled:opacity-50',
+          invalidFields.has(key) ? 'border-red-400/60' : 'border-white/10',
+        )}
+      />
+    </label>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {field('width', '宽度')}
+        {field('height', '高度')}
+        {field('frameRate', '帧率')}
+        {field('bitrateMin', '最低码率 Kbps（留空=不传）')}
+        {field('bitrateMax', '最高码率 Kbps（留空=不传）')}
+        <label className="block">
+          <span className="text-xs text-muted mb-1 block">优化模式</span>
+          <select
+            value={draft.optimizationMode}
+            onChange={(e) => set('optimizationMode')(e.target.value)}
+            disabled={disabled}
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+          >
+            <option value="motion">motion（流畅优先）</option>
+            <option value="detail">detail（画质优先）</option>
+          </select>
+        </label>
+      </div>
+
+      <label className="block">
+        <span className="text-xs text-muted mb-1 block">编码格式</span>
+        <select
+          value={draft.codec}
+          onChange={(e) => set('codec')(e.target.value)}
+          disabled={disabled}
+          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm disabled:opacity-50"
+        >
+          <option value="h264">H.264</option>
+          <option value="vp8">VP8</option>
+          <option value="vp9">VP9（Beta）</option>
+        </select>
+      </label>
+
+      {/* 结构性错误：必须修正 */}
+      {rejections.length > 0 && (
+        <ul className="text-xs text-red-300 space-y-0.5">
+          {rejections.map((issue, index) => (
+            <li key={`${issue.code}-${index}`}>· {issue.message}</li>
+          ))}
+        </ul>
+      )}
+
+      {/* 风险提示：只提示，不修改用户输入 */}
+      {warnings.length > 0 && (
+        <ul className="text-xs text-yellow-300 space-y-0.5">
+          {warnings.map((issue, index) => (
+            <li key={`${issue.code}-${index}`}>· {issue.message}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function getCookie(name: string): string | null {
   const m = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
@@ -47,10 +172,27 @@ export default function SharePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [lowLatency, setLowLatency] = useState(false);
-  const [qualityIdx, setQualityIdx] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [allowedQualities, setAllowedQualities] = useState<string[]>([]);
+  /** 服务端下发的画质预设（替代原先前端硬编码的 QUALITY_OPTIONS） */
+  const [presets, setPresets] = useState<QualityPresetOption[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+  const [useCustom, setUseCustom] = useState(false);
+  const [customDraft, setCustomDraft] = useState({
+    width: '1920',
+    height: '1080',
+    frameRate: '30',
+    bitrateMin: '',
+    bitrateMax: '',
+    optimizationMode: 'motion' as QualityOptimizationMode,
+    codec: 'h264' as QualityCodec,
+  });
+  /** 前端即时校验出的提示（含 reject / warn） */
   const [shareError, setShareError] = useState('');
+  /** 服务端回传的风险提示：只展示，不修改用户输入 */
+  const [qualityWarnings, setQualityWarnings] = useState<QualityIssue[]>([]);
+  /** 开始共享后服务端确认的生效快照 */
+  const [activeSnapshot, setActiveSnapshot] = useState<QualitySnapshot | null>(null);
   const [idleCountdown, setIdleCountdown] = useState<number | null>(null);
   const [noViewerCountdown, setNoViewerCountdown] = useState<number | null>(null);
   const idleDeadlineRef = useRef<number | null>(null);
@@ -68,9 +210,13 @@ export default function SharePage() {
     api.getShareInfo(token)
       .then((data) => {
         setInfo(data);
-        const allowed = QUALITY_OPTIONS.filter((q) => data.allowedQualities?.includes(q.key));
-        setAllowedQualities(allowed.map((q) => q.key));
-        setQualityIdx(allowed.length > 0 ? QUALITY_OPTIONS.indexOf(allowed[0]) : null);
+        // 画质预设改由服务端下发，并与服务器的白名单取交集
+        const allowed = (data.qualityPresets ?? []).filter((preset) =>
+          (data.allowedQualities ?? []).includes(preset.id),
+        );
+        setPresets(allowed);
+        setAllowedQualities(allowed.map((preset) => preset.id));
+        setSelectedPresetId(allowed.length > 0 ? allowed[0].id : null);
         // 恢复已持久化的低延迟模式
         if (data.lowLatency) setLowLatency(true);
         setLoading(false);
@@ -135,33 +281,84 @@ export default function SharePage() {
     return () => clearInterval(id);
   }, [socket.noViewerRemainingSec]);
 
+  // 派生值：必须在 handleStart 之前声明，否则闭包里会用到未初始化的块级变量
+  const selectedPreset = useMemo(
+    () => presets.find((preset) => preset.id === selectedPresetId) ?? null,
+    [presets, selectedPresetId],
+  );
+
+  // 本机即时校验：与服务端同一套规则，只为即时反馈，服务端仍会再校验一次
+  const customIssues = useMemo(
+    () => (useCustom ? validateCustomQuality(parseCustomDraft(customDraft), info?.qualityLimits) : []),
+    [useCustom, customDraft, info?.qualityLimits],
+  );
+  const customRejections = customIssues.filter((issue) => issue.severity === 'reject');
+  const customWarnings = customIssues.filter((issue) => issue.severity === 'warn');
+  const canStart = useCustom ? customRejections.length === 0 : !!selectedPreset;
+
   const handleStart = useCallback(async () => {
     setShareError('');
-    if (qualityIdx === null || !allowedQualities.includes(QUALITY_OPTIONS[qualityIdx]?.key)) {
-      setShareError('该服务器暂未开放任何共享画质，请联系服务器管理员。');
-      return;
-    }
-    // 检查是否正在其他 session 共享
+    setQualityWarnings([]);
+
     const active = getActiveShare();
     if (active && active !== token) {
       setShareError('您正在另一个会话中共享，请先停止那个共享再开始新的。');
       return;
     }
-    const result = await screenShare.publish({
-      qualityKey: QUALITY_OPTIONS[qualityIdx].key,
-      lowLatency,
-      bitrateConfig: info?.qualityBitrates?.[QUALITY_OPTIONS[qualityIdx].key],
-    });
-    if (result.success) {
-      const resp = await socket.startSharing(QUALITY_OPTIONS[qualityIdx].key, clientId, lowLatency);
-      if (resp.ok) {
-        setActiveShare(token);
-      } else {
-        screenShare.stop();
-        setShareError('无法开始共享，可能已有其他人正在共享或链接已失效。');
+
+    // 自定义模式：直接用用户填的参数，不要求出现在预设白名单里
+    if (useCustom) {
+    const issues = validateCustomQuality(parseCustomDraft(customDraft), info?.qualityLimits);
+    const rejecting = issues.filter((issue) => issue.severity === 'reject');
+      if (rejecting.length > 0) {
+        setShareError(rejecting.map((issue) => issue.message).join('；'));
+        return;
       }
+    } else if (!selectedPreset) {
+      setShareError('该服务器暂未开放任何共享画质，请联系服务器管理员。');
+      return;
     }
-  }, [screenShare, socket, qualityIdx, allowedQualities, token, clientId, lowLatency, info]);
+
+    const custom = useCustom ? parseCustomDraft(customDraft) : undefined;
+    const encoderConfig = custom
+      ? custom
+      : selectedPreset
+        ? {
+            width: selectedPreset.width,
+            height: selectedPreset.height,
+            frameRate: selectedPreset.frameRate,
+            bitrateMin: selectedPreset.bitrateMin,
+            bitrateMax: selectedPreset.bitrateMax,
+            optimizationMode: selectedPreset.optimizationMode,
+            codec: selectedPreset.codec,
+          }
+        : null;
+    if (!encoderConfig) {
+      setShareError('该服务器暂未开放任何共享画质，请联系服务器管理员。');
+      return;
+    }
+
+    const result = await screenShare.publish({ encoderConfig, lowLatency });
+    if (!result.success) return;
+
+    const resp = await socket.startSharing(
+      useCustom ? undefined : selectedPreset?.id,
+      clientId,
+      lowLatency,
+      custom,
+    );
+    if (resp.ok) {
+      setActiveShare(token);
+      // 服务端回传的风险提示：只展示，不修改用户输入
+      setQualityWarnings(resp.warnings ?? []);
+      if (resp.quality) setActiveSnapshot(resp.quality);
+    } else {
+      screenShare.stop();
+      setShareError(resp.message || '无法开始共享，可能已有其他人正在共享或链接已失效。');
+    }
+  }, [
+    screenShare, socket, useCustom, customDraft, selectedPreset, token, clientId, lowLatency, info,
+  ]);
 
   const handleStop = useCallback(async () => {
     await screenShare.stop();
@@ -274,38 +471,96 @@ export default function SharePage() {
             </div>
           )}
 
-          {/* 画质选择按钮组 */}
+          {/* 画质选择：预设（服务端下发）或自定义 */}
           <div className="mb-4">
-            <label className="text-xs text-muted mb-2 block text-center">选择画质</label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-              {QUALITY_OPTIONS.map((q) => {
-                const idx = QUALITY_OPTIONS.indexOf(q);
-                const enabled = allowedQualities.includes(q.key);
-                const selected = qualityIdx !== null && idx === qualityIdx;
-                return (
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <span className="text-xs text-muted">选择画质</span>
+              <button
+                onClick={() => setUseCustom(false)}
+                disabled={screenShare.isSharing || socket.ended || lockedByOther}
+                className={cn(
+                  'text-xs px-2 py-0.5 rounded-full transition-colors',
+                  !useCustom ? 'bg-brand/20 text-white' : 'text-muted hover:text-white',
+                )}
+              >
+                预设
+              </button>
+              <button
+                onClick={() => setUseCustom(true)}
+                disabled={screenShare.isSharing || socket.ended || lockedByOther}
+                className={cn(
+                  'text-xs px-2 py-0.5 rounded-full transition-colors',
+                  useCustom ? 'bg-brand/20 text-white' : 'text-muted hover:text-white',
+                )}
+              >
+                自定义
+              </button>
+            </div>
+
+            {!useCustom ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {presets.map((preset) => (
                   <button
-                    key={q.key}
-                    disabled={!enabled || screenShare.isSharing || socket.ended || lockedByOther}
-                    onClick={() => { if (enabled) setQualityIdx(idx); }}
+                    key={preset.id}
+                    disabled={screenShare.isSharing || socket.ended || lockedByOther}
+                    onClick={() => setSelectedPresetId(preset.id)}
                     className={cn(
                       'flex flex-col items-center gap-1 px-3 py-2 rounded-lg border cursor-pointer transition-all text-sm',
-                      selected
+                      preset.id === selectedPresetId
                         ? 'border-brand bg-brand/20 text-white shadow-lg shadow-brand/30 ring-2 ring-brand/50'
-                        : enabled
-                          ? 'border-white/8 bg-white/[0.03] text-muted hover:border-white/15'
-                          : 'border-white/5 bg-white/[0.01] text-dim cursor-not-allowed',
+                        : 'border-white/8 bg-white/[0.03] text-muted hover:border-white/15',
                       (screenShare.isSharing || socket.ended || lockedByOther) && 'opacity-40 cursor-not-allowed',
                     )}
                   >
-                    <span className="font-medium">{q.label}</span>
-                    <span className="text-dim text-xs">{q.encoderConfig.width}×{q.encoderConfig.height}</span>
-                    {!enabled && <span className="text-xs text-dim">未开放</span>}
+                    <span className="font-medium">{preset.label}</span>
+                    <span className="text-dim text-xs">{preset.width}×{preset.height}</span>
                   </button>
-                );
-              })}
-            </div>
+                ))}
+                {presets.length === 0 && (
+                  <p className="col-span-full text-xs text-dim text-center py-2">
+                    该服务器暂未开放任何共享画质，请联系服务器管理员。
+                  </p>
+                )}
+              </div>
+            ) : (
+              <CustomQualityForm
+                draft={customDraft}
+                onChange={setCustomDraft}
+                disabled={screenShare.isSharing || socket.ended || lockedByOther}
+                rejections={customRejections}
+                warnings={customWarnings}
+              />
+            )}
           </div>
-          {allowedQualities.length === 0 && (
+
+          {/* 生效参数 + 服务端风险提示 */}
+          {activeSnapshot && (
+            <div className="mb-4 glass rounded-xl p-3 text-xs">
+              <p className="text-muted mb-1">当前生效参数</p>
+              <p className="font-mono">
+                {activeSnapshot.width}×{activeSnapshot.height}@{activeSnapshot.frameRate}fps
+                {' · '}{activeSnapshot.optimizationMode}
+                {' · '}{activeSnapshot.codec}
+              </p>
+              <p className="text-dim mt-0.5">计费档位：{activeSnapshot.tier}</p>
+            </div>
+          )}
+
+          {qualityWarnings.length > 0 && (
+            <div className="mb-4 glass rounded-xl p-3 border border-yellow-400/40">
+              <p className="text-xs font-medium text-yellow-300 flex items-center gap-1.5 mb-1">
+                <TriangleAlert className="w-3.5 h-3.5" />
+                风险提示（已按您的设置开始）
+              </p>
+              <ul className="text-xs text-muted space-y-0.5">
+                {qualityWarnings.map((issue, index) => (
+                  <li key={`${issue.code}-${index}`}>· {issue.message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {allowedQualities.length === 0 && !useCustom && (
             <p className="text-sm text-yellow-300 text-center mb-4">
               该服务器暂未开放任何共享画质，请联系服务器管理员。
             </p>
@@ -351,7 +606,7 @@ export default function SharePage() {
             /* GRACE 状态 - 共享者 - 可恢复，显示倒计时 */
             <button
               onClick={handleStart}
-              disabled={qualityIdx === null}
+              disabled={!canStart}
               className={cn(
                 'w-full py-5 rounded-2xl text-white font-semibold text-lg flex items-center justify-center gap-3 transition-all',
                 'bg-gradient-to-r from-brand-dark to-brand hover:scale-[1.01] disabled:opacity-40 disabled:cursor-not-allowed',
