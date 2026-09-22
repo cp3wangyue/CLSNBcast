@@ -374,12 +374,22 @@ npm run verify        # = typecheck + build + test
   - [x] 🔑 浏览器实测：奇数宽度被拒；最高码率 20000 只黄字提示且**输入框保持 20000**
         （不修改用户输入）；预设模式渲染服务端下发的全部 7 档
   - [x] 单测 18 个（web）
-  - [ ] 超管画质预设管理 UI（增删改停用排序）—— 服务端 `QualityPresetService` 已就绪，
-        本轮先交付分享页，管理页与 Phase 3 剩余部分一起做
-- [ ] **3-4 运行中动态切换**：`setEncoderConfiguration` 切换分辨率 / 帧率 / 码率
-      （`optimizationMode` 与 `codec` 是 track/client 级参数，**不支持**运行中切换）
+- [x] **3-4 运行中动态切换**
+  - [x] `SessionService.updateQualityLive()`：切换分辨率 / 帧率 / 码率，更新快照，
+        并**切分账本区间**（旧档位以 `tier_change` 收口 + 新档位开始）
+  - [x] `POST /api/share/quality` 端点；非法参数 → 400 `QUALITY_INVALID`，快照不被破坏
+  - [x] `setEncoderConfiguration` 接线（`useScreenShare.setEncoderConfig`）
+  - [x] 前端「运行中调整编码参数」面板（仅共享中显示）；
+        `optimizationMode` 与 `codec` 明确标注**不可在运行中切换**（SDK 限制）
+  - [x] 🔑 顺序固定：**先服务端校验并切分账本区间，再调 SDK**，否则账目会把切换前的时间算到新档位上
+  - [x] 🐛 修复实现中发现的真实缺陷：`pauseViewerBilling` 会把 `billingStartedAt` 置空，
+        导致随后的 `openAllViewerIntervals` 认为无人计费而**不开新区间**（档位切换后观众停止计费）。
+        已改为 pause → 写快照 → resume → 开区间，并由测试锁定
+  - [x] 单测 7 个：切换生效、部分参数保持、区间切分、非法参数拒绝、无快照时报错、
+        优化模式与编码格式保持、主播区间不被打断
 - [ ] **3-5 统计面板**：`getStats()` + `network-quality`，目标 vs 实际对比
   - [ ] ⚠️ 注意：本项目 preset key 与 Agora 内置 preset 名**部分同名但语义不同**（详见 [architecture-analysis.md](./architecture-analysis.md) 第 2 节 SDK 核实）。**绝不能把本项目的 quality key 直接当 `VideoEncoderConfigurationPreset` 字符串传给 SDK**，必须在类型层面隔离
+- [ ] 超管画质预设管理 UI（服务端 `QualityPresetService` 已就绪）
 
 ### 验收
 
