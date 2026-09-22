@@ -1,0 +1,39 @@
+# CLSNBcast 反向代理
+#
+# 使用 Caddy 自动签发与续期 HTTPS 证书。
+# 域名来自环境变量 DOMAIN（在 .env 中设置）；未设置时 Caddy 会以“无域名”模式启动（仅本地监听）。
+#
+# ⚠️ 屏幕采集（getDisplayMedia）要求 HTTPS 或 localhost，
+#    所以生产环境必须通过 https:// 访问。
+
+{
+	# 日志不记录敏感头，避免凭证泄漏到日志
+	log {
+		format console
+		level WARN
+	}
+}
+
+{$DOMAIN:localhost} {
+	encode gzip
+
+	# SSE（/api/share/stream）必须禁用缓冲，否则事件会被缓存住
+	reverse_proxy clsnbcast:3520 {
+		flush_interval -1
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# 上传体积限制（与后端 body-parser 的 1mb 保持一致）
+	request_body {
+		max_size 2MB
+	}
+
+	# 安全响应头
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}

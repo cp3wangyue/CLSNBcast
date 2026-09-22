@@ -1,4 +1,43 @@
+# CLSNBcast 生产部署
+#
+# 结构：
+#   caddy（反向代理 + 自动 HTTPS）
+#   clsnbcast（应用）
+#
+# 只有 caddy 对外暴露 80/443；应用只监听容器内网，不直接对外。
+#
+# 使用步骤见 DEPLOY.md。
 services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: clsnbcast-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3（QUIC）
+      - "443:443/udp"
+    env_file:
+      - .env
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      clsnbcast:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2019/metrics" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   clsnbcast:
     build:
       context: .
@@ -6,25 +45,22 @@ services:
     container_name: clsnbcast
     restart: unless-stopped
     init: true
-    ports:
-      - "127.0.0.1:${PORT:-3520}:3520"
+    # 不直接对外暴露端口；统一由 caddy 代理
     env_file:
       - .env
     environment:
       - NODE_ENV=production
     volumes:
       - clsnbcast-data:/app/data
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3520/"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+    logging: *logging
 
 volumes:
   clsnbcast-data:
+  caddy-data:
+  caddy-config:
