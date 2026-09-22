@@ -16,11 +16,16 @@ import * as bcrypt from 'bcryptjs';
 import { createHmac } from 'crypto';
 import { AgoraProviderService } from '../agora/agora-provider.service';
 import { QualityConfigService } from '../quality/quality-config.service';
+import { QualityPresetService } from '../quality/quality-preset.service';
 import { UsageLedgerService } from '../usage/usage-ledger.service';
 import {
   CreateAgoraProviderDto,
   UpdateAgoraProviderDto,
 } from '../agora/agora-provider.dto';
+import {
+  CreateQualityPresetDto,
+  UpdateQualityPresetDto,
+} from './super-admin.dto';
 import {
   SuperAdminLoginDto,
   UpdateGlobalConfigDto,
@@ -45,6 +50,7 @@ export class SuperAdminController {
     private readonly providers: AgoraProviderService,
     private readonly qualityConfig: QualityConfigService,
     private readonly usage: UsageLedgerService,
+    private readonly presets: QualityPresetService,
   ) {
     const pwd = process.env.SUPER_ADMIN_PASSWORD!;
     this.superPasswordHash = bcrypt.hashSync(pwd, 10);
@@ -435,6 +441,39 @@ export class SuperAdminController {
   @Get('usage/sessions/:sessionId')
   getSessionUsage(@Param('sessionId') sessionId: string) {
     return this.usage.getSessionUsage(sessionId);
+  }
+
+  // ===== 画质预设（Phase 3）=====
+
+  /** 全部预设（含停用），按 sort_order 升序。 */
+  @Get('qualities')
+  listQualities() {
+    return this.presets.list();
+  }
+
+  /**
+   * 新增画质预设。
+   *
+   * `id` 一旦写入不可改 —— 它被 `servers.allowed_qualities` 与存量会话引用。
+   */
+  @Post('qualities')
+  @HttpCode(HttpStatus.OK)
+  createQuality(@Body() dto: CreateQualityPresetDto) {
+    return { ok: true, preset: this.presets.create(dto) };
+  }
+
+  /** 更新预设参数。id 不可改。 */
+  @Put('qualities/:id')
+  updateQuality(@Param('id') id: string, @Body() dto: UpdateQualityPresetDto) {
+    const updated = this.presets.update(id, dto);
+    if (!updated) return { ok: false, message: '画质预设不存在' };
+    return { ok: true, preset: updated };
+  }
+
+  /** 删除预设。内置或被会话引用的不可删除 —— 要停用请用 update({ enabled: false })。 */
+  @Delete('qualities/:id')
+  removeQuality(@Param('id') id: string) {
+    return this.presets.remove(id);
   }
 
   private toCreateRequest(dto: CreateAgoraProviderDto) {
