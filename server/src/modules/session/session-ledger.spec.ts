@@ -547,10 +547,17 @@ describe('SessionService × UsageLedger（2-2 接线）', () => {
     it('checkpoint 把账本派生的观众时长落盘', () => {
       const session = createActiveSession();
       sessions.viewerConnected(session.id, 'viewer-1');
+
+      // 落盘值是 checkpoint 那一刻的快照，而实时值会继续增长。
+      // 因此断言"落在两次采样之间"（单调不减），而不是断言与实时值相等 ——
+      // 后者在测试跑得慢时会偶发失败，属测试写法问题，不是产品问题。
+      const before = ledger.getViewerDurationMs(session.id);
       sessions.checkpointViewerDurations();
+      const after = ledger.getViewerDurationMs(session.id);
 
       const row = db.getSessionById(session.id)!;
-      expect(row.viewerDurationMs).toBe(ledger.getViewerDurationMs(session.id));
+      expect(row.viewerDurationMs).toBeGreaterThanOrEqual(before);
+      expect(row.viewerDurationMs).toBeLessThanOrEqual(after);
     });
 
     it('🔒 历史会话（账本里没有区间但有落盘时长）使用落盘的时长', () => {
