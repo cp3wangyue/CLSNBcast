@@ -242,6 +242,170 @@ docker compose down -v       # 停止并删除数据卷（⚠️ 会丢数据）
 
 ---
 
+## 备选：Windows Server 原生部署（不使用 Docker）
+
+适用于没有 Docker 的 Windows 服务器。**本仓库的 `Dockerfile` / `docker-compose.yml` 不参与**，
+改为直接用 Node 跑单进程 + Caddy 做 TLS 终止。
+
+> 适用前提：Windows Server 2016 及以上。下文路径以 `C:\clsnbcast` 为例，可按需替换。
+
+### 与 Docker 方案的差异
+
+| 项 | Docker 方案 | Windows 原生方案 |
+|---|---|---|
+| 运行时 | 镜像内 `node:20.19-alpine` | 手动装 Node 20 到 `C:\nodejs` |
+| TLS | Caddy 容器 + 自动签发 | Caddy for Windows（单 exe）+ 自签或正式证书 |
+| 进程守护 | compose `restart: unless-stopped` | NSSM 注册为 Windows 服务 |
+| 数据 | 命名卷 `clsnbcast-data` | 目录 `C:\clsnbcast\data` |
+| `better-sqlite3` | 镜像内用 `apk` 装工具链现场编译 | **必须用预编译包**，见下方「已知陷阱」 |
+
+### 步骤
+
+**1. 安装 Node 20**
+
+从 <https://nodejs.org/dist/> 取 `node-v20.x.x-win-x64.zip`，解压到 `C:\nodejs`，
+并把该目录加入系统 `PATH`。
+
+```powershell
+$ver = 'v20.19.0'
+Invoke-WebRequest "https://nodejs.org/dist/$ver/node-$ver-win-x64.zip" -OutFile "$env:TEMP\node.zip"
+Expand-Archive "$env:TEMP\node.zip" -DestinationPath 'C:\'
+Rename-Item "C:\node-$ver-win-x64" 'nodejs'
+# 加入系统 PATH（新开的会话生效）
+$m = [Environment]::GetEnvironmentVariable('Path','Machine')
+[Environment]::SetEnvironmentVariable('Path', "$m;C:\nodejs", 'Machine')
+```
+
+> ⚠️ Windows Server 2016 **没有内置 `tar`**（内置 tar 从 Windows 10 18063 起才有），
+> 上传产物请用 zip + `Expand-Archive`，不要用 `tar.gz`。
+
+**2. 本地构建并上传产物**
+
+```bash
+npm install && npm run build
+```
+
+上传 `server/dist`、`web/dist`、`package.json`、`package-lock.json`、
+`server/package.json`、`web/package.json` 到 `C:\clsnbcast`，然后解压。
+
+**3. 安装生产依赖**
+
+```powershell
+$env:Path = 'C:\nodejs;' + $env:Path
+Set-Location 'C:\clsnbcast'
+npm install --omit=dev --workspace server --include-workspace-root=false --no-audit --no-fund --ignore-scripts
+```
+
+**4. 修复 `better-sqlite3`（见下方「已知陷阱」）**
+
+**5. 写 `.env`**（放在 `C:\clsnbcast\.env`，即项目根）
+
+`server/dist/main.js` 会向上两级找 `.env`，位置不能放错。至少填
+`SUPER_ADMIN_PASSWORD` 与 `SECRET_ENCRYPTION_KEY`（`openssl rand -hex 32` 生成）。
+
+**6. 注册为 Windows 服务**
+
+用 [NSSM](https://nssm.cc/) 让应用脱离 SSH/RDP 会话运行，并支持开机自启与崩溃重启：
+
+```powershell
+# 注意：用 Start-Process 在 SSH 会话里启动的进程会随会话结束而被回收，必须注册成服务
+.\nssm.exe install CLSNBcast 'C:\nodejs\node.exe' 'server\dist\main.js'
+.\nssm.exe set CLSNBcast AppDirectory 'C:\clsnbcast'
+.\nssm.exe set CLSNBcast Start SERVICE_AUTO_START
+.\nssm.exe set CLSNBcast AppStdout 'C:\clsnbcast\app.log'
+.\nssm.exe set CLSNBcast AppStderr 'C:\clsnbcast\app.err.log'
+.\nssm.exe set CLSNBcast AppExit Default Restart
+.\nssm.exe start CLSNBcast
+```
+
+**7. 用 Caddy 提供 HTTPS**
+
+单文件 `caddy.exe` 即可，无需 Docker。配置见
+[`deploy/Caddyfile.selfsigned`](./deploy/Caddyfile.selfsigned)（自签）或
+[`deploy/Caddyfile`](./deploy/Caddyfile)（有域名时用自动签发）。
+
+```powershell
+# 先校验配置再启动
+.\caddy.exe validate --config C:\clsnbcast\deploy\Caddyfile.selfsigned --adapter caddyfile
+.\nssm.exe install CLSNBcastProxy 'C:\caddy\caddy.exe' 'run --config C:\clsnbcast\deploy\Caddyfile.selfsigned --adapter caddyfile'
+.\nssm.exe set CLSNBcastProxy AppDirectory 'C:\caddy'
+.\nssm.exe set CLSNBcastProxy Start SERVICE_AUTO_START
+.\nssm.exe start CLSNBcastProxy
+```
+
+**8. 放行防火墙**
+
+```powershell
+New-NetFirewallRule -DisplayName 'CLSNBcast 443' -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow -Profile Any
+New-NetFirewallRule -DisplayName 'CLSNBcast 3520' -Direction Inbound -Protocol TCP -LocalPort 3520 -Action Allow -Profile Any
+```
+
+### 已知陷阱
+
+**`better-sqlite3` 在 Node 20 上无法直接安装。** 依赖声明的 `v12.x` **没有 Node 20（ABI 115）
+的预编译包**，npm 会回退到源码编译，而 Windows 服务器通常没有 Python 与 C++ 工具链，
+安装直接失败：
+
+```
+npm error gyp ERR! find Python
+npm error gyp ERR! stack Error: Could not find any Python installation to use
+```
+
+两条路：
+
+- **推荐：换用有 ABI 115 预编译包的版本（`v11.10.0`）**。项目只用到
+  `prepare` / `exec` / `pragma` / `transaction` / `close`，这些自 v9 起 API 稳定。
+  做法是下载 npm tarball 与对应预编译二进制，组装后覆盖 `node_modules/better-sqlite3`。
+  注意预编译 release 包**只含 `build/Release/*.node`，不含 JS 包装层**，
+  必须与 npm tarball 合并，不能单独使用。
+- **备选：装构建工具链**（Python + Visual Studio Build Tools）。在 1 核 2GB 的机器上代价很高。
+
+用 Node 20（ABI 115）的二进制包名形如
+`better-sqlite3-v11.10.0-node-v115-win32-x64.tar.gz`，可在
+<https://github.com/WiseLibs/better-sqlite3/releases> 核对目标版本是否提供。
+
+**自签证书必须把内网 IP 也列为站点地址。** IP 访问不发送 SNI（SNI 只用于主机名），
+Caddy 会改用连接的「本地地址」匹配证书。若服务器在 1:1 NAT 之后，外部访问
+公网 IP 会被 NAT 改写成内网地址，Caddy 看到的本地地址是内网 IP，
+只列公网 IP 会导致握手失败：`no certificate available for '172.x.x.x'`。
+`Caddyfile.selfsigned` 已把公网 IP、内网 IP、`127.0.0.1` 一并列出。
+
+**`TRUST_PROXY` 必须与部署形态一致。** 有反代时保持默认（信任一跳），
+否则 `req.ip` 恒为 `127.0.0.1`，按 IP 的登录限流会让所有访问者共用同一个「IP」；
+反之，**直接暴露应用时必须设 `TRUST_PROXY=false`**，否则客户端可伪造
+`X-Forwarded-For` 绕过限流。
+
+### 运维命令
+
+```powershell
+Get-Service CLSNBcast, CLSNBcastProxy          # 状态
+Restart-Service CLSNBcast                      # 重启应用（改 .env 后需要）
+Restart-Service CLSNBcastProxy                 # 重启代理（改 Caddyfile 后需要）
+Get-Content C:\clsnbcast\app.log -Tail 50 -Wait # 跟踪日志
+```
+
+升级：本地 `npm run build`，重新上传 `server/dist` 与 `web/dist`，
+`Restart-Service CLSNBcast`。数据库迁移由应用启动时自动执行，**升级前先备份 `C:\clsnbcast\data`**。
+
+### 自签证书的浏览器警告
+
+自签证书不被预置信任，首次访问会出现安全警告，需要手动点过
+（Chrome：高级 → 继续前往；较新版本需在警告页输入 `thisisunsafe`）。
+
+想彻底消除警告，把 Caddy 根证书导入客户端「受信任的根证书颁发机构」：
+
+```
+C:\Users\<用户名>\AppData\Roaming\Caddy\pki\authorities\local\root.crt
+```
+
+> 该证书由 Caddy 在首次启动时生成。Caddy 尝试自动装入**服务器本机**信任存储时，
+> 在 Windows Server 2016 上可能报
+> `failed to install root certificate: The request is not supported`。
+> 这**不影响 HTTPS 服务本身**，只是服务器自己也不信任该证书；
+> 需要信任的是**客户端**机器，手动导入即可。
+
+---
+
 ## 环境变量一览
 
 见 [.env.example](./.env.example)。运行时读取的变量：

@@ -1,0 +1,61 @@
+# CLSNBcast 反向代理 —— 自签证书模式（无域名部署）
+#
+# 用 Caddy 内置本地 CA（`tls internal`）签发证书，不依赖域名与 ACME 校验，
+# 因此无需 80 端口、无需公网域名、无需备案。
+#
+# ===== 使用前必须设置两个环境变量 =====
+#
+#   CLSNBCAST_PUBLIC_IP    对外访问用的公网 IP
+#   CLSNBCAST_INTERNAL_IP  服务器网卡上的实际 IP（ipconfig 可见）
+#
+# 以 NSSM 注册服务时这样设置：
+#
+#   nssm set CLSNBcastProxy AppEnvironmentExtra CLSNBCAST_PUBLIC_IP=203.0.113.10 CLSNBCAST_INTERNAL_IP=192.168.1.100
+#   nssm restart CLSNBcastProxy
+#
+# ⚠️ 为什么必须同时列公网与内网 IP：
+#    IP 地址访问不发送 SNI（SNI 只用于主机名），此时 Caddy 改用连接的
+#    「本地地址」匹配证书。若服务器在 1:1 NAT 之后，外部访问公网 IP 会被
+#    NAT 改写成内网地址，Caddy 看到的本地地址是内网 IP —— 只列公网 IP
+#    会导致握手失败：no certificate available for '172.x.x.x'。
+#    127.0.0.1 保留用于在服务器本机自测。
+#
+# ⚠️ 自签证书不被浏览器预置信任，首次访问会出现安全警告，需要手动点过
+#    （Chrome: 高级 → 继续前往；较新版本需在警告页输入 thisisunsafe）。
+#    想彻底消除警告：把 Caddy 根证书导入客户端「受信任的根证书颁发机构」，
+#    位置见 DEPLOY.md「自签证书的浏览器警告」。
+#
+# 屏幕采集（getDisplayMedia）与 Agora Web SDK 都要求安全上下文，
+# 所以必须通过 https:// 访问 —— 这正是本文件存在的理由。
+
+{
+	# 日志不记录敏感头，避免凭证泄漏到日志
+	log {
+		format console
+		level WARN
+	}
+}
+
+https://{$CLSNBCAST_PUBLIC_IP}, https://{$CLSNBCAST_INTERNAL_IP}, https://127.0.0.1 {
+	tls internal
+
+	encode gzip
+
+	# SSE（/api/share/stream）必须禁用缓冲，否则事件会被缓存住
+	reverse_proxy 127.0.0.1:3520 {
+		flush_interval -1
+	}
+
+	# 上传体积限制（与后端 body-parser 的 1mb 保持一致）
+	request_body {
+		max_size 2MB
+	}
+
+	# 安全响应头
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}
