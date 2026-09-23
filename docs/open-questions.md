@@ -84,6 +84,7 @@
 | 11 | ✅ `deploy.sh` 曾硬编码默认值 | `deploy.sh:4` `SSH_HOST=rainyun` | 换环境需改脚本 | **已修**：`SSH_HOST` 改为必填（环境变量或首个位置参数），缺失时在构建前报错；新增可选 `SSH_PORT` 与 `-h/--help` |
 | 12 | ✅ **`incremental` + `deleteOutDir` 组合导致产物残缺**（上游遗留，严重） | `server/tsconfig.json` 的 `incremental: true` 把增量信息写到 `dist` 之外的 `server/tsconfig.build.tsbuildinfo`，而 `server/nest-cli.json` 开了 `deleteOutDir` | **第二次及以后的构建什么都不输出**，`dist` 变成空目录或只剩改动过的文件。`deploy.sh` 与 Docker 镜像会拿到残缺产物，容器启动即 `MODULE_NOT_FOUND` | **Phase 0 已修**（`tsconfig.build.json` 设 `incremental: false`） |
 | 13 | ✅ **`rootDir` 推断导致入口点漂移** | `server/tsconfig.build.json` 原先未固定 `rootDir` | 在 `server/` 根目录新增任何 `.ts`（如 `vitest.config.ts`）都会把 `rootDir` 上移，产物从 `dist/main.js` 变成 `dist/src/main.js`，打断 `Dockerfile` 的 `CMD` 与 `deploy.sh` 的存在性检查 | **Phase 0 已修**（显式固定 `rootDir: "./src"`） |
+| 14 | ⚠️ **`better-sqlite3` 在 Node 20 上无预编译包，装不上**（2026-09-22 真实部署时发现） | `server/package.json:20` `better-sqlite3: ^12.11.1` | v12.x 只发布 ABI 127/137/141/147 的预编译包，**没有 Node 20 的 ABI 115**，npm 回退到源码编译；无 Python / C++ 工具链的机器直接安装失败（`gyp ERR! find Python`）。Docker 路径不受影响（镜像内装了工具链现场编译） | **Windows 部署已在 `DEPLOY.md` 记录解法**（换用有 ABI 115 预编译包的 `v11.10.0`）；**仓库依赖声明未改**——是否把版本约束下调以便所有环境统一，留待决策 |
 
 ---
 

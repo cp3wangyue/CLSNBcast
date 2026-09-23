@@ -445,6 +445,9 @@ npm run verify        # = typecheck + build + test
       缺失时脚本在**本地构建之前**就报错退出，不再先跑完 build 才在上传阶段失败；
       新增可选 `SSH_PORT`（集中组装 `ssh -p` / `scp -P`，并校验为数字）与 `-h/--help`。
       `REMOTE_DIR` / `SERVICE` 保留默认值——它们跟随项目本身而非某台机器，且原本就可用环境变量覆盖
+  - [x] `DEPLOY.md` 增补「Windows Server 原生部署」章节（不使用 Docker）：Node 安装、
+        NSSM 注册服务、Caddy 自签 HTTPS、防火墙、运维命令、已知陷阱。
+        配套新增 `deploy/Caddyfile.selfsigned`（站点地址走环境变量，不硬编码 IP）
 
 ### 验收
 
@@ -459,8 +462,40 @@ npm run verify        # = typecheck + build + test
       换一个 IP 仍返回 **200**
 - [x] ✅ compose 结构校验：仅 Caddy 发布 80/443/443-udp；两服务均带 healthcheck；
       `logging` 锚点正确复用；Caddyfile 挂载为只读
-- [ ] 在干净 VPS 上从零部署 / HTTPS 访问 / 重启数据不丢 —— **均需真实服务器**，
-      卷与代理已配置好，待实机验收
+- [x] ✅ **真实服务器部署验收**（Windows Server 2016 原生路径，非 Docker）：
+      从零部署 → HTTPS 访问 → 重启数据不丢，三项全部实测通过。详见下节。
+- [ ] ⏳ **Docker / Linux 路径在真实服务器上仍未验证**：`Dockerfile` + `docker-compose.yml` +
+      `deploy.sh` 这条链路至今只在静态结构校验层面验证过（compose 结构、bundle 无秘密等），
+      从未在真实 Linux VPS 上跑通。上面那项验收用的是 Windows 原生路径，
+      **不能替代**对容器链路的验证。
+
+#### 真实服务器部署验收证据（2026-09-22）
+
+目标机：Windows Server 2016 Datacenter（1 核 / 2 GB / 40 GB），无 Docker、无 Node、无 Git。
+
+| 验收项 | 结果 |
+|---|---|
+| 从零部署 | ✅ Node 20.19.0 + 应用 + Caddy 全部从零安装；数据库一次建到 schema v5，5 个迁移齐全，16 张表 |
+| HTTPS 访问 | ✅ 公网 `https://<ip>/` → 200；`/super` 200；`/api/meta/admin-migration` 200；`/api/notices?page=share` 200；未鉴权 `/api/super/config` → **401** |
+| 重启数据不丢 | ✅ 写入真实业务数据（`notices` 行）→ 重启两个服务 → 数据与 schema 版本完整保留，测试数据已清理 |
+| 服务守护 | ✅ 两个 Windows 服务（`CLSNBcast` / `CLSNBcastProxy`）均 `Running` + `StartMode=Auto`（开机自启、崩溃自动重启） |
+| 安全上下文 | ✅ 经 https 加载，`getDisplayMedia` 与 Agora Web SDK 的前置条件满足（HTTP 下两者均不可用，这是本次部署的核心目的） |
+| 限流与反代 | ✅ 连续登录第 9 次起返回 429；伪造 `X-Forwarded-For` **无法**绕过限流（Caddy 追加真实来源，`trust proxy=1` 取最后一跳） |
+
+**过程中发现并解决的三个真实问题**（均已写入 `DEPLOY.md`）：
+
+1. **`better-sqlite3` 在 Node 20 上装不上**：依赖声明的 `v12.x` 没有 ABI 115（Node 20）的
+   预编译包，npm 回退源码编译，而该机无 Python/C++ 工具链。改用有 ABI 115 预编译包的
+   `v11.10.0`（项目只用 `prepare`/`exec`/`pragma`/`transaction`/`close`，这些自 v9 起稳定）。
+   **注意：该替换只作用于服务器部署目录，仓库 `package.json` 未改。**
+2. **自签证书必须覆盖内网 IP**：IP 访问不发送 SNI，Caddy 改用连接的「本地地址」匹配证书；
+   1:1 NAT 会把外部访问的目的地址改写成内网地址，只列公网 IP 会握手失败
+   （`no certificate available for '172.x.x.x'`）。
+3. **`TRUST_PROXY` 必须随部署形态切换**：有反代时保持默认（信任一跳），直接暴露时必须设
+   `false`，否则客户端可伪造 `X-Forwarded-For` 绕过按 IP 限流。
+
+> 未验证项：KOOK webhook 端到端与 Agora 实际推流/观看仍需真实 KOOK Bot Token 与 Agora 凭证，
+> 与 Phase 1 / 2 / 3 / 5 中记录的限制一致。
 
 ---
 
