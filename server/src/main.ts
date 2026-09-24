@@ -161,20 +161,21 @@ async function bootstrap() {
     // Per-role HMAC key isolation
     let hmacKey: string;
     if (payload.role === 'super_admin') {
-      hmacKey = SUPER_SECRET;
+      hmacKey = SUPER_SECRET!;
     } else if (payload.role === 'server_admin') {
       // Use per-server secret from DB
       const server = db.getServer(payload.serverId);
       if (!server) {
         return res.status(401).json({ message: '服务器不存在' });
       }
-      hmacKey = (server as any).serverSecret || SUPER_SECRET; // fallback to legacy shared secret
+      // serverSecret 可能为空，回退到旧版共享密钥；SUPER_SECRET 已在启动时校验非空
+      hmacKey = (server as any).serverSecret || SUPER_SECRET!;
     } else if (payload.role === 'space_admin') {
       const server = db.getSpace(payload.platform, payload.externalId);
       if (!server || server.serverId !== payload.spaceId) {
         return res.status(401).json({ message: '平台空间不存在' });
       }
-      hmacKey = server.serverSecret || SUPER_SECRET;
+      hmacKey = server.serverSecret || SUPER_SECRET!;
     } else {
       return res.status(401).json({ message: '无效的登录凭证' });
     }

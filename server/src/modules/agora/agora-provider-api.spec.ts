@@ -80,7 +80,7 @@ describe('Agora Provider 管理端接口', () => {
     it('创建并返回管理端视图，不含明文证书', () => {
       const result = createPlatformProvider();
       expect(result.ok).toBe(true);
-      expect(result.provider.hasAppCertificate).toBe(true);
+      expect(result.provider!.hasAppCertificate).toBe(true);
       expect(JSON.stringify(result)).not.toContain(CERT);
     });
 
@@ -105,20 +105,20 @@ describe('Agora Provider 管理端接口', () => {
         ownerType: 'user', ownerId: 'kook-1', name: 'byok', appId: APP_ID, appCertificate: CERT,
       } as any);
 
-      expect(space.provider.ownerType).toBe('space');
-      expect(user.provider.ownerType).toBe('user');
+      expect(space.provider!.ownerType).toBe('space');
+      expect(user.provider!.ownerType).toBe('user');
     });
 
     it('更新 Provider 时不传 appCertificate 则证书保持不变', () => {
       const { provider } = createPlatformProvider();
-      superAdmin.updateProvider(provider.id, { name: '改名' } as any);
-      expect(providers.getWithSecrets(provider.id)!.appCertificate).toBe(CERT);
+      superAdmin.updateProvider(provider!.id, { name: '改名' } as any);
+      expect(providers.getWithSecrets(provider!.id)!.appCertificate).toBe(CERT);
     });
 
     it('更新时可以轮换证书', () => {
       const { provider } = createPlatformProvider();
-      superAdmin.updateProvider(provider.id, { appCertificate: 'rotated-cert' } as any);
-      expect(providers.getWithSecrets(provider.id)!.appCertificate).toBe('rotated-cert');
+      superAdmin.updateProvider(provider!.id, { appCertificate: 'rotated-cert' } as any);
+      expect(providers.getWithSecrets(provider!.id)!.appCertificate).toBe('rotated-cert');
     });
 
     it('更新不存在的 Provider 返回失败', () => {
@@ -131,7 +131,7 @@ describe('Agora Provider 管理端接口', () => {
 
     it('删除未被引用的 Provider', () => {
       const { provider } = createPlatformProvider();
-      expect(superAdmin.removeProvider(provider.id).ok).toBe(true);
+      expect(superAdmin.removeProvider(provider!.id).ok).toBe(true);
       expect(superAdmin.listProviders()).toHaveLength(0);
     });
 
@@ -161,8 +161,8 @@ describe('Agora Provider 管理端接口', () => {
     it('创建时强制绑定到当前服务器', () => {
       const result = createOwn(SPACE_A);
       expect(result.ok).toBe(true);
-      expect(result.provider.ownerType).toBe('space');
-      expect(result.provider.ownerId).toBe(SPACE_A);
+      expect(result.provider!.ownerType).toBe('space');
+      expect(result.provider!.ownerId).toBe(SPACE_A);
     });
 
     it('🔒 请求里伪造 ownerType/ownerId 不会生效（防越权创建平台池 Provider）', () => {
@@ -175,8 +175,8 @@ describe('Agora Provider 管理端接口', () => {
         ownerId: SPACE_B,
       } as any);
 
-      expect(result.provider.ownerType).toBe('space');
-      expect(result.provider.ownerId).toBe(SPACE_A);
+      expect(result.provider!.ownerType).toBe('space');
+      expect(result.provider!.ownerId).toBe(SPACE_A);
       // 平台池里没有多出东西
       expect(providers.listForAdminByOwner('platform', '')).toHaveLength(0);
     });
@@ -198,32 +198,32 @@ describe('Agora Provider 管理端接口', () => {
     it('可以更新自己的 Provider', () => {
       const { provider } = createOwn(SPACE_A);
       const result = spaceAdmin.updateProvider(
-        { serverId: SPACE_A, id: provider.id },
+        { serverId: SPACE_A, id: provider!.id },
         { name: '新名字' } as any,
       );
       expect(result.ok).toBe(true);
-      expect(providers.getForAdmin(provider.id)!.name).toBe('新名字');
+      expect(providers.getForAdmin(provider!.id)!.name).toBe('新名字');
     });
 
     it('🔒 不能更新别的服务器的 Provider（IDOR）', () => {
       const { provider } = createOwn(SPACE_B);
 
       const result = spaceAdmin.updateProvider(
-        { serverId: SPACE_A, id: provider.id },
+        { serverId: SPACE_A, id: provider!.id },
         { name: '被篡改' } as any,
       );
 
       expect(result.ok).toBe(false);
-      expect(providers.getForAdmin(provider.id)!.name).toBe('自带凭证');
+      expect(providers.getForAdmin(provider!.id)!.name).toBe('自带凭证');
     });
 
     it('🔒 不能删除别的服务器的 Provider（IDOR）', () => {
       const { provider } = createOwn(SPACE_B);
 
-      const result = spaceAdmin.removeProvider({ serverId: SPACE_A, id: provider.id });
+      const result = spaceAdmin.removeProvider({ serverId: SPACE_A, id: provider!.id });
 
       expect(result.ok).toBe(false);
-      expect(providers.getForAdmin(provider.id)).toBeTruthy();
+      expect(providers.getForAdmin(provider!.id)).toBeTruthy();
     });
 
     it('🔒 不能操作平台池 Provider', () => {
@@ -238,8 +238,8 @@ describe('Agora Provider 管理端接口', () => {
 
     it('可以删除自己的 Provider', () => {
       const { provider } = createOwn(SPACE_A);
-      expect(spaceAdmin.removeProvider({ serverId: SPACE_A, id: provider.id }).ok).toBe(true);
-      expect(providers.getForAdmin(provider.id)).toBeUndefined();
+      expect(spaceAdmin.removeProvider({ serverId: SPACE_A, id: provider!.id }).ok).toBe(true);
+      expect(providers.getForAdmin(provider!.id)).toBeUndefined();
     });
 
     it('不存在的服务器返回失败', () => {
@@ -265,7 +265,7 @@ describe('Agora Provider 管理端接口', () => {
 
       expect(resolution.status).toBe('ok');
       if (resolution.status !== 'ok') throw new Error('unreachable');
-      expect(resolution.provider.appId).toBe(APP_ID);
+      expect(resolution.provider!.appId).toBe(APP_ID);
       expect(resolution.reason).toBe('space-default');
     });
 
