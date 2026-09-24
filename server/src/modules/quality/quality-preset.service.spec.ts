@@ -5,7 +5,7 @@ import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseService } from '../database/database.service';
 import { QualityConfigService } from './quality-config.service';
-import { DEFAULT_QUALITY_PRESETS, QualityPresetError, QualityPresetService } from './quality-preset.service';
+import { QualityPresetError, QualityPresetService } from './quality-preset.service';
 
 describe('QualityPresetService', () => {
   let dir: string;

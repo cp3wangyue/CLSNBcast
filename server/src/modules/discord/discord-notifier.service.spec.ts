@@ -140,7 +140,7 @@ describe('DiscordNotifierService', () => {
   });
 
   it('会话结束 -> 更新已发布的公开卡片', async () => {
-    const { db, bus, svc, sessionStore } = setup();
+    const { bus, svc, sessionStore } = setup();
     sessionStore.set('s6', {
       id: 's6', status: 'ended', sharerUsername: 'alice',
       totalViewerJoins: 3, durationMs: 60_000,

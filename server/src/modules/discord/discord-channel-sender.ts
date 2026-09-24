@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DiscordApiClient } from './discord-api.client';
-import {
-  DiscordMessageSender,
-  DiscordNotifierService,
-} from './discord-notifier.service';
+import { DiscordMessageSender } from './discord-notifier.service';
 import { DiscordMessagePayload } from './discord-message-builder';
 import { SecretCryptoService } from '../crypto/secret-crypto.service';
 

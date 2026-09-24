@@ -31,7 +31,6 @@ export class KookService implements OnModuleInit {
   }
 
   async startApiClient() {
-    const globalCfg = this.db.getGlobalConfig();
     // Bot Token 在库中加密存储，明文只在本地变量里用于创建 API 客户端
     const token = this.crypto.getGlobalSecret('kookBotToken');
     if (!token) {
@@ -133,7 +132,7 @@ export class KookService implements OnModuleInit {
     // serverId = guildId (雪花 ID，不变，用于主键和 URL)
     // openId 存储用于面板显示
     this.logger.log(`[DB] Creating/reactivating server record: guildId=${guildId}, guildName=${guildName}, ownerId=${ownerId}, openId=${openId}`);
-    const server = this.db.createServer(guildId, guildName, ownerId, '', openId);
+    this.db.createServer(guildId, guildName, ownerId, '', openId);
     
     // 记录机器人加入事件
     this.db.addServerEvent(guildId, 'bot_joined', ownerId, guildName, `机器人加入服务器`);

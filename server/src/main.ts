@@ -36,7 +36,7 @@ const rateLimitMap = new Map<string, RateLimitEntry>();
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 分钟窗口
 const RATE_LIMIT_MAX = 10; // 每窗口最大请求数
 
-function checkRateLimit(key: string, res: any): boolean {
+function checkRateLimit(key: string, _res: any): boolean {
   const now = Date.now();
   const entry = rateLimitMap.get(key);
   if (!entry || now > entry.resetAt) {

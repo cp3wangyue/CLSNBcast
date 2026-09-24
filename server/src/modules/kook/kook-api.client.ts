@@ -87,6 +87,8 @@ export class KookApiClient {
   async getGuildList(): Promise<any[]> {
     const items: any[] = [];
     let page = 1;
+    // 分页循环：出口是下面的 break（页码到达总数 / 当前页为空），不是常量条件
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const data = await this.getApi(`/guild/list?page=${page}&page_size=50`);
       const current = Array.isArray(data?.items) ? data.items : [];
@@ -101,6 +103,7 @@ export class KookApiClient {
   async getGuildChannels(guildId: string): Promise<any[]> {
     const items: any[] = [];
     let page = 1;
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       const data = await this.getApi(
         `/channel/list?guild_id=${encodeURIComponent(guildId)}&page=${page}&page_size=50`,

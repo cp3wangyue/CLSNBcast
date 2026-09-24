@@ -1,6 +1,7 @@
 /** 转义 KOOK KMarkdown 中的特殊字符，防止用户名中的 `*`、`_`、`[`、`]` 等导致排版异常 */
 function escapeMarkdown(s: string): string {
-  return s.replace(/([*_\[\]`~\\])/g, '\\$1');
+  // 字符组内的 [ 与 ] 无需转义（\] 是必要的，它要转义字符组结束符）
+  return s.replace(/([*_[`~\\\]])/g, '\\$1');
 }
 
 /** 发起共享时仅回复给发起人的临时卡片 */

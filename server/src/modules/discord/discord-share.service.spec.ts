@@ -6,7 +6,6 @@ import Database from 'better-sqlite3';
 import { DatabaseService } from '../database/database.service';
 import { DiscordShareService } from './discord-share.service';
 import { DISCORD_INTERACTION, DiscordInteraction } from './discord.types';
-import { SecretCryptoService } from '../crypto/secret-crypto.service';
 import { ProviderUnavailableError } from '../session/session.service';
 
 process.env.SUPER_ADMIN_PASSWORD = 'test-password';
@@ -52,12 +51,10 @@ function interaction(guildId?: string, channelId = 'c1'): DiscordInteraction {
 describe('DiscordShareService', () => {
   let db: DatabaseService;
   let sessions: any;
-  let crypto: SecretCryptoService;
   let svc: DiscordShareService;
 
   beforeEach(() => {
     db = makeDb();
-    crypto = new SecretCryptoService(db);
     sessions = {
       createSession: (p: any) => ({
         id: 'sess-1',
