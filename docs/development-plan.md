@@ -541,4 +541,11 @@ npm run verify        # = typecheck + build + test
 4. **修改数据库结构时提供明确 migration**（走 `schema_migrations`）。
 5. **新增功能不得破坏现有 KOOK Bot、Session、观看链接、屏幕音频和 Agora RTC 基础功能。** 每个阶段都要完整跑一遍回归链路。
 6. **每完成一个阶段必须执行 build、typecheck 和相关测试。**
+   （已由 `.github/workflows/ci.yml` 自动化：push / PR 时跑 `npm run verify`。
+   ⚠️ CI 固定 Node 24 —— `better-sqlite3` v12.x 没有 Node 20 的预编译包，
+   降到 20 会让 CI 因源码编译失败，见 [open-questions.md](./open-questions.md) 问题 #14）
 7. 会话/服务器表加列时，**对照五处联动清单**（[data-model-design.md](./data-model-design.md) 5.4）。
+8. **新增平台必须先登记到 `SUPPORTED_PLATFORMS`**（`modules/platform/platform.types.ts`）。
+   鉴权与归属判断走 `strictPlatform()`（未知值返回 `null`），
+   只有读取路径才用 `normalizePlatform()`（未知值回退到默认平台）——
+   多平台下「未知即 KOOK」会变成越权入口。
