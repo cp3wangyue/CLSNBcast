@@ -25,7 +25,14 @@ export const SECRET_ENCRYPTION_KEY_ENV = 'SECRET_ENCRYPTION_KEY';
  * - 明文只在**签发 Token 的那一刻**出现在内存里，不写日志、不进 API 响应。
  */
 /** `global_config` 中需要加密存储的秘密键（Phase 5）。 */
-const GLOBAL_SECRET_KEYS = ['kookBotToken', 'kookVerifyToken', 'kookEncryptKey'] as const;
+const GLOBAL_SECRET_KEYS = [
+  'kookBotToken',
+  'kookVerifyToken',
+  'kookEncryptKey',
+  // Discord Bot Token 与 KOOK Bot Token 同级：泄露即可冒充机器人，
+  // 因此同样加密存储（Discord 的 Public Key 不是秘密，走明文 global_config）
+  'discordBotToken',
+] as const;
 
 export type GlobalSecretKey = (typeof GLOBAL_SECRET_KEYS)[number];
 
