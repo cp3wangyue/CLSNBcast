@@ -12,7 +12,7 @@ import { safeEqual } from './modules/auth/safe-compare';
 import * as bodyParser from 'body-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { DEFAULT_PLATFORM, normalizePlatform } from './modules/platform/platform.types';
+import { DEFAULT_PLATFORM, strictPlatform } from './modules/platform/platform.types';
 import { DatabaseService } from './modules/database/database.service';
 import { installLogScrubber } from './modules/logging/log-scrubber';
 
@@ -73,6 +73,13 @@ async function bootstrap() {
   // body-parser 会按 Content-Encoding 解压；Codec 另外兼容没有 Header 的 zlib 数据。
   app.use(
     '/api/integrations/kook/webhook',
+    bodyParser.raw({ type: () => true, limit: '1mb', inflate: true }),
+  );
+
+  // Discord 交互同样按原始字节验签（Ed25519 覆盖 timestamp + rawBody）。
+  // 若这里走 JSON parser，请求体被解析再序列化后字节就变了，签名必然失败。
+  app.use(
+    '/api/integrations/discord/webhook',
     bodyParser.raw({ type: () => true, limit: '1mb', inflate: true }),
   );
 
@@ -197,14 +204,20 @@ async function bootstrap() {
       const spaceMatch = path.match(/^\/api\/spaces\/([^/]+)\/([^/]+)/);
       // legacy 路由没有 platform 段，它历史上只对应默认平台（KOOK）；
       // 非默认平台的 token 必须走 canonical 路由，否则会绕过平台归属校验。
-      const tokenPlatform = normalizePlatform(payload.platform);
+      //
+      // 这里用 strictPlatform 而非 normalizePlatform：多平台下"未知即 KOOK"
+      // 会让别的平台的凭证被判成 KOOK 并通过 KOOK 的路由校验。
+      const tokenPlatform = strictPlatform(payload.platform);
+      if (!tokenPlatform) {
+        return res.status(403).json({ message: '无权访问此平台空间' });
+      }
       const legacyAllowed =
         tokenPlatform === DEFAULT_PLATFORM &&
         legacyMatch &&
         payload.externalId === legacyMatch[1];
       const canonicalAllowed =
         spaceMatch &&
-        tokenPlatform === normalizePlatform(spaceMatch[1]) &&
+        tokenPlatform === strictPlatform(spaceMatch[1]) &&
         payload.externalId === spaceMatch[2];
       if (!legacyAllowed && !canonicalAllowed) {
         return res.status(403).json({ message: '无权访问此平台空间' });

@@ -9,6 +9,7 @@ import {
   PlatformId,
   isSupportedPlatform,
   normalizePlatform,
+  strictPlatform,
   platformLabel,
 } from './platform.types';
 
@@ -36,10 +37,10 @@ describe('platform.types', () => {
   describe('isSupportedPlatform', () => {
     it('登记过的平台返回 true', () => {
       expect(isSupportedPlatform('kook')).toBe(true);
+      expect(isSupportedPlatform('discord')).toBe(true);
     });
 
     it('未登记的平台返回 false', () => {
-      expect(isSupportedPlatform('discord')).toBe(false);
       expect(isSupportedPlatform('qq')).toBe(false);
       expect(isSupportedPlatform('')).toBe(false);
     });
@@ -75,9 +76,36 @@ describe('platform.types', () => {
     });
   });
 
+  describe('strictPlatform（鉴权/写入路径）', () => {
+    it('登记过的平台原样返回', () => {
+      expect(strictPlatform('kook')).toBe('kook');
+      expect(strictPlatform('discord')).toBe('discord');
+    });
+
+    it('未知平台返回 null，而不是回退到默认平台', () => {
+      // 这是 multi-platform 下的关键安全约束：若这里回退成 kook，
+      // 一个不属于任何已知平台的凭证会被判成 KOOK 并通过 KOOK 的路由校验。
+      expect(strictPlatform('some-future-platform')).toBeNull();
+      expect(strictPlatform('KOOK')).toBeNull();
+    });
+
+    it('空值返回 null', () => {
+      expect(strictPlatform('')).toBeNull();
+      expect(strictPlatform(null)).toBeNull();
+      expect(strictPlatform(undefined)).toBeNull();
+    });
+
+    it('与 normalizePlatform 的区别正是本次要锁定的语义', () => {
+      const weird = 'not-a-platform';
+      expect(normalizePlatform(weird)).toBe(DEFAULT_PLATFORM);
+      expect(strictPlatform(weird)).toBeNull();
+    });
+  });
+
   describe('platformLabel', () => {
     it('已知平台返回可读名称', () => {
       expect(platformLabel('kook')).toBe('KOOK');
+      expect(platformLabel('discord')).toBe('Discord');
     });
 
     it('未知输入回退为默认平台的名称，不会显示成 undefined', () => {

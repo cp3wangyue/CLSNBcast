@@ -9,6 +9,7 @@ import { UsageRollupScheduler } from './modules/usage/usage-rollup.scheduler';
 import { SessionModule } from './modules/session/session.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { KookModule } from './modules/kook/kook.module';
+import { DiscordModule } from './modules/discord/discord.module';
 import { ShareModule } from './modules/share/share.module';
 import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 import { ServerAdminModule } from './modules/server-admin/server-admin.module';
@@ -25,6 +26,7 @@ import { NoticesModule } from './modules/notices/notices.module';
     SessionModule,
     AuthModule,
     KookModule,
+    DiscordModule,
     ShareModule,
     SuperAdminModule,
     ServerAdminModule,

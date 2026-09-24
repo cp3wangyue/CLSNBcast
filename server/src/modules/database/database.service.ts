@@ -16,6 +16,11 @@ export interface GlobalConfig {
   kookBotToken: string;
   kookVerifyToken: string;
   kookEncryptKey: string;
+  /**
+   * Discord 应用的 Public Key（hex）。不是秘密，官方明确说明可公开。
+   * `global_config` 是键值表，新增键不需要 migration。
+   */
+  discordPublicKey: string;
   publicDomain: string;
   triggerWordLabels: string[];
   qualityBitrates: QualityBitrateConfig;
@@ -400,6 +405,7 @@ export class DatabaseService implements OnModuleDestroy {
       kookBotToken: map.get('kookBotToken') || '',
       kookVerifyToken: map.get('kookVerifyToken') || '',
       kookEncryptKey: map.get('kookEncryptKey') || '',
+      discordPublicKey: map.get('discordPublicKey') || '',
       publicDomain: map.get('publicDomain') || 'http://localhost:3520',
       triggerWordLabels: this.parseTriggerWordLabels(map.get('triggerWordLabels')),
       qualityBitrates: this.parseQualityBitrates(map.get('qualityBitrates')),

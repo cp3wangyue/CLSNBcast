@@ -14,7 +14,7 @@
  */
 
 /** 当前代码真正支持的平台。新增平台时必须先在这里登记。 */
-export const SUPPORTED_PLATFORMS = ['kook'] as const;
+export const SUPPORTED_PLATFORMS = ['kook', 'discord'] as const;
 
 export type PlatformId = (typeof SUPPORTED_PLATFORMS)[number];
 
@@ -30,6 +30,7 @@ export const DEFAULT_PLATFORM: PlatformId = 'kook';
 /** 前端/管理端展示用的平台名。未登记的平台回退为原始字符串，避免显示成 undefined。 */
 const PLATFORM_LABELS: Record<string, string> = {
   kook: 'KOOK',
+  discord: 'Discord',
 };
 
 export function isSupportedPlatform(value: string): value is PlatformId {
@@ -37,14 +38,30 @@ export function isSupportedPlatform(value: string): value is PlatformId {
 }
 
 /**
- * 归一化平台标识。
+ * 归一化平台标识（**读取路径**专用）。
  *
  * 空值、null、非登记值都回退到 `DEFAULT_PLATFORM`——读取路径永远不该因为
  * 一个未知字符串而抛错或返回 `undefined`，否则存量数据会凭空消失。
+ *
+ * ⚠️ **不要用它做鉴权**。多平台下把未知值静默当成 KOOK，会让一个本应
+ * 属于别的平台的凭证被判成 KOOK 并通过 KOOK 的路由校验。
+ * 鉴权请使用 `strictPlatform()`。
  */
 export function normalizePlatform(value: string | null | undefined): PlatformId {
   if (!value) return DEFAULT_PLATFORM;
   return isSupportedPlatform(value) ? value : DEFAULT_PLATFORM;
+}
+
+/**
+ * 严格解析平台标识（**鉴权 / 写入路径**专用）。
+ *
+ * 与 `normalizePlatform` 的区别：非登记值返回 `null` 而不是回退到默认平台。
+ * 单平台时代「未知即 KOOK」是无害的；一旦有多个平台，这个假设会变成
+ * 越权入口，因此凡涉及「这个凭证/这条记录属于哪个平台」的判断都必须走这里。
+ */
+export function strictPlatform(value: string | null | undefined): PlatformId | null {
+  if (!value) return null;
+  return isSupportedPlatform(value) ? value : null;
 }
 
 export function platformLabel(platform: string | null | undefined): string {

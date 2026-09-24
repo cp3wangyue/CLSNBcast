@@ -19,7 +19,7 @@ import { AgoraProviderService } from '../agora/agora-provider.service';
 import { QualityConfigService } from '../quality/quality-config.service';
 import { QualityPresetService } from '../quality/quality-preset.service';
 import { SecretCryptoService } from '../crypto/secret-crypto.service';
-import { normalizePlatform } from '../platform/platform.types';
+import { DEFAULT_PLATFORM, strictPlatform } from '../platform/platform.types';
 import {
   CreateSpaceProviderDto,
   UpdateSpaceProviderDto,
@@ -43,8 +43,10 @@ export class ServerAdminController {
   ) {}
 
   private resolveSpace(params: Record<string, string>) {
-    // 存量 KOOK 路由是 /api/server/:serverId，没有 platform 段，靠归一化兜底。
-    const platform = normalizePlatform(params.platform);
+    // canonical 路由带 platform 段，用严格解析：多平台下"未知即 KOOK"会让
+    // 别的平台的空间被当成 KOOK 空间处理。
+    // 存量 KOOK 路由是 /api/server/:serverId，没有 platform 段，回退到默认平台。
+    const platform = strictPlatform(params.platform) ?? DEFAULT_PLATFORM;
     const externalId = params.externalId || params.serverId || '';
     return {
       platform,
