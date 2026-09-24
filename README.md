@@ -159,10 +159,10 @@ npm start              # 以生产模式启动（需先 build）
 单元测试用 **vitest**，测试文件与被测模块同目录，命名为 `*.spec.ts`。
 当前只覆盖不依赖 NestJS DI 反射的纯逻辑模块；`server/tsconfig.build.json` 已排除 `**/*spec.ts`，因此测试文件不会进入构建产物。
 
-**Lint 的基线策略**：存量代码有 149 处 `any`（Express 中间件、平台事件 payload 等），
-一次性清理风险太大。因此 `npm run lint` 走基线门禁 —— 告警数
-**超过基线即失败**（阻止新增），存量不阻塞；逐步清理后把
-`server/.eslint-baseline.json` 下调即可锁定成果。error 级问题必须为零。
+**Lint 的基线策略**：存量代码有 220 处 `any`（server 149 + web 71，主要是 Express
+中间件、平台事件 payload、Agora SDK 回调等），一次性清理风险太大。因此
+`npm run lint` 走基线门禁 —— 告警数**超过基线即失败**（阻止新增），存量不阻塞；
+逐步清理后把对应的 `.eslint-baseline.json` 下调即可锁定成果。error 级问题必须为零。
 
 本地开发时前端 Vite 会把 `/api` 代理到 `http://localhost:3520`，可用 `VITE_API_TARGET` 覆盖。
 
