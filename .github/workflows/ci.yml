@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同名工作流的新一次运行会取消掉仍在跑的旧运行，省掉排队等待
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck + build + test
+    runs-on: ubuntu-latest
+
+    # ⚠️ 不要降到 Node 20：better-sqlite3 v12.x 没有 ABI 115 的预编译包，
+    # npm 会回退到源码编译，在没有构建工具链的 runner 上直接失败
+    # （见 docs/open-questions.md 问题 #14）。Node 24 的 ABI 137 有预编译包，
+    # 也满足 package.json 的 engines: node >=20。
+    strategy:
+      matrix:
+        node-version: ['24']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      # 用 ci 而非 install：严格按 lock 文件装，lock 与 package.json 不一致时直接失败，
+      # 而不是静默改写 lock。
+      - name: Install dependencies
+        run: npm ci
+
+      # 等价于 typecheck + build + test（见根 package.json 的 verify 脚本）
+      - name: Verify
+        run: npm run verify
+        env:
+          # 应用启动时要求该变量存在，否则进程直接退出（main.ts）
+          SUPER_ADMIN_PASSWORD: ci-placeholder-password
