@@ -497,6 +497,24 @@ npm run verify        # = typecheck + build + test
 > 未验证项：KOOK webhook 端到端与 Agora 实际推流/观看仍需真实 KOOK Bot Token 与 Agora 凭证，
 > 与 Phase 1 / 2 / 3 / 5 中记录的限制一致。
 
+#### Discord 链路实证（2026-09-25，服务器）
+
+早期实测只到达 `createSession` 就因 `NO_PROVIDER` 返回，原因是**我绕过加密路径直接裸写
+`app_certificate_enc` 列**，导致 `getWithSecrets` 解密失败 → Provider 被判 `unhealthy`。
+改用应用自己的创建接口（证书经 `SecretCryptoService` 加密写入）后：
+
+- Provider 健康检查 `healthy`，库中为 `v1:` 密文
+- `/share` 返回真实链接 `https://<domain>/share?t=<64 位 hex>`
+- 该 token 在 `sessions` 表可查到：`status=pending`、已绑定 `provider_id` 与 `agora_app_id` 快照
+- 抓取分享页返回 **200**
+
+另新增集成测试（`discord-integration.spec.ts`）：真实 DatabaseService / SecretCryptoService /
+AgoraProviderService / SessionService 按真实依赖装配，不 mock，覆盖成功路径与
+「能用该会话签出发布端与观众端 Token」。
+
+> 仍待验证：Discord 应用真实交互（需在 Discord 注册 `/share` 斜杠命令并配置
+> Application Public Key）、真实的屏幕采集与推流（需 HTTPS + 真实 Agora 项目）。
+
 ---
 
 ## Phase 5 — 安全加固（可选，建议但非必需）
