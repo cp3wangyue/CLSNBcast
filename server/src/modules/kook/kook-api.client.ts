@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { errorMessage, isAbortError } from '../../common/error-message';
 
 const API_BASE = 'https://www.kookapp.cn/api/v3';
 
@@ -140,8 +141,8 @@ export class KookApiClient {
           ...(init.headers || {}),
         },
       });
-    } catch (error: any) {
-      const message = error?.name === 'TimeoutError' ? 'request timeout' : 'network failure';
+    } catch (error: unknown) {
+      const message = isAbortError(error) ? 'request timeout' : 'network failure';
       throw new KookApiError(`KOOK API ${path} ${message}`, true);
     }
 

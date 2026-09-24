@@ -109,9 +109,9 @@ describe('DiscordWebhookController', () => {
       try {
         c.receive(request(shareInteraction(), { sig: 'aa'.repeat(64) }));
         throw new Error('should have thrown');
-      } catch (e: any) {
-        expect(e.status).toBe(401);
-        expect(e.message).toBe('invalid_request_signature');
+      } catch (e: unknown) {
+        expect((e as { status: number }).status).toBe(401);
+        expect((e as { message: string }).message).toBe('invalid_request_signature');
       }
     });
 
@@ -119,9 +119,9 @@ describe('DiscordWebhookController', () => {
       const c = makeController('', { status: 'ok' });
       try {
         c.receive(request({ type: DISCORD_INTERACTION_PING }));
-      } catch (e: any) {
-        expect(e.status).toBe(500);
-        expect(e.message).toBe('discord_public_key_missing');
+      } catch (e: unknown) {
+        expect((e as { status: number }).status).toBe(500);
+        expect((e as { message: string }).message).toBe('discord_public_key_missing');
       }
     });
 
@@ -129,8 +129,8 @@ describe('DiscordWebhookController', () => {
       const c = makeController(publicKeyHex, { status: 'ok' });
       try {
         c.receive({ headers: {}, body: Buffer.from('{"type":1}') } as any);
-      } catch (e: any) {
-        expect(e.status).toBe(401);
+      } catch (e: unknown) {
+        expect((e as { status: number }).status).toBe(401);
       }
     });
 
@@ -144,9 +144,9 @@ describe('DiscordWebhookController', () => {
           headers: { 'x-signature-timestamp': ts, 'x-signature-ed25519': sig },
           body: raw,
         } as any);
-      } catch (e: any) {
-        expect(e.status).toBe(400);
-        expect(e.message).toBe('invalid_json');
+      } catch (e: unknown) {
+        expect((e as { status: number }).status).toBe(400);
+        expect((e as { message: string }).message).toBe('invalid_json');
       }
     });
 
@@ -155,8 +155,8 @@ describe('DiscordWebhookController', () => {
       const other = generateKeyPairSync('ed25519');
       try {
         c.receive(request(shareInteraction(), { key: other.privateKey }));
-      } catch (e: any) {
-        expect(e.status).toBe(401);
+      } catch (e: unknown) {
+        expect((e as { status: number }).status).toBe(401);
       }
     });
   });

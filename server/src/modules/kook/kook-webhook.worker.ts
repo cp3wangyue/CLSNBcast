@@ -88,7 +88,7 @@ export class KookWebhookWorker implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `KOOK webhook processed: key=${event.eventKey} type=${event.eventType} result=${handled ? 'done' : 'ignored'}`,
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       const errorCode = error instanceof KookApiError
         ? `kook_api_${error.status || 'network'}_${error.kookCode || 'unknown'}`
         : 'processing_error';

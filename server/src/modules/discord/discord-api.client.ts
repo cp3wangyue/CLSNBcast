@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { DiscordMessagePayload } from './discord-message-builder';
+import { errorMessage, isAbortError } from '../../common/error-message';
 
 const API_BASE = 'https://discord.com/api/v10';
 
@@ -76,8 +77,8 @@ export class DiscordApiClient {
         },
         signal: controller.signal,
       });
-    } catch (error: any) {
-      const message = error?.name === 'AbortError' ? 'request timeout' : 'network failure';
+    } catch (error: unknown) {
+      const message = isAbortError(error) ? 'request timeout' : 'network failure';
       throw new DiscordApiError(`Discord API ${path} ${message}`, true);
     } finally {
       clearTimeout(timer);

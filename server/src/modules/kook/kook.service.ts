@@ -7,6 +7,7 @@ import { EventBusService } from '../events/events.service';
 import { buildShareLinkCard, buildViewingCard, buildEndedShareCard, buildHelpCard, buildBindCard, buildAlreadyBoundCard, buildBindRequestCard } from './card-builder';
 import { KookApiClient } from './kook-api.client';
 import { KookMessageEvent, KookButtonClickEvent } from './kook-event.types';
+import { errorMessage } from '../../common/error-message';
 
 @Injectable()
 export class KookService implements OnModuleInit {
@@ -43,8 +44,8 @@ export class KookService implements OnModuleInit {
       if (me?.id) this.bot.setBotId(String(me.id));
       this.logger.log(`KOOK API client ready: ${me?.username || '(unknown)'} (id=${me?.id || 'unknown'})`);
       await this.syncGuilds();
-    } catch (err: any) {
-      this.logger.error('KOOK API client init failed: ' + (err?.message || err));
+    } catch (err: unknown) {
+      this.logger.error('KOOK API client init failed: ' + (errorMessage(err, String(err))));
     }
   }
 
@@ -85,8 +86,8 @@ export class KookService implements OnModuleInit {
         }
       }
       this.logger.log(`[SYNC] Guild sync complete: ${syncedCount} new, ${skippedCount} existing, ${guilds.length} total`);
-    } catch (err: any) {
-      this.logger.error('[SYNC] Failed to sync guilds: ' + (err?.message || err));
+    } catch (err: unknown) {
+      this.logger.error('[SYNC] Failed to sync guilds: ' + (errorMessage(err, String(err))));
     }
   }
 
@@ -121,8 +122,8 @@ export class KookService implements OnModuleInit {
         this.logger.log(`[API] Guild info parsed: id=${guildId}, open_id=${openId}, user_id=${ownerId}, name=${guildName}`);
         if (ownerId) break;
         this.logger.warn(`[API] Attempt ${attempt}: No user_id in guild info, retrying...`);
-      } catch (err: any) {
-        this.logger.error(`[API] Attempt ${attempt}: Failed to get guild info: ${err?.message || err}`);
+      } catch (err: unknown) {
+        this.logger.error(`[API] Attempt ${attempt}: Failed to get guild info: ${errorMessage(err, String(err))}`);
         if (attempt < 3) {
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
@@ -162,8 +163,8 @@ export class KookService implements OnModuleInit {
         } else {
           this.logger.warn(`[CARD] No text channel found in guild ${guildId}, skipping bind card`);
         }
-      } catch (err: any) {
-        this.logger.error(`[CARD] Failed to send bind card to owner ${ownerId}: ${err?.message || err}`);
+      } catch (err: unknown) {
+        this.logger.error(`[CARD] Failed to send bind card to owner ${ownerId}: ${errorMessage(err, String(err))}`);
       }
     } else {
       this.logger.warn(`[CARD] No owner found for guild ${guildId}, skipping bind card`);
@@ -301,8 +302,8 @@ export class KookService implements OnModuleInit {
     try {
       guildInfo = await this.bot?.getGuild(guildId);
       ownerId = guildInfo?.user_id || '';
-    } catch (err: any) {
-      this.logger.error(`[HELP] Failed to get guild info for ${guildId}: ${err?.message || err}`);
+    } catch (err: unknown) {
+      this.logger.error(`[HELP] Failed to get guild info for ${guildId}: ${errorMessage(err, String(err))}`);
       return;
     }
 
@@ -341,8 +342,8 @@ export class KookService implements OnModuleInit {
       try {
         await this.bot?.sendTempCardMessage(event.target_id, card, authorId);
         this.logger.log(`[HELP] Sent already-bound card to owner ${authorId} in guild ${guildId}`);
-      } catch (err: any) {
-        this.logger.error(`[HELP] Failed to send already-bound card: ${err?.message || err}`);
+      } catch (err: unknown) {
+        this.logger.error(`[HELP] Failed to send already-bound card: ${errorMessage(err, String(err))}`);
       }
       return;
     }
@@ -360,8 +361,8 @@ export class KookService implements OnModuleInit {
     try {
       await this.bot?.sendTempCardMessage(event.target_id, card, authorId);
       this.logger.log(`[HELP] Sent bind request card to owner ${authorId} in guild ${guildId}`);
-    } catch (err: any) {
-      this.logger.error(`[HELP] Failed to send bind request card: ${err?.message || err}`);
+    } catch (err: unknown) {
+      this.logger.error(`[HELP] Failed to send bind request card: ${errorMessage(err, String(err))}`);
     }
   }
 
@@ -428,13 +429,13 @@ export class KookService implements OnModuleInit {
     try {
       await this.bot?.sendTempCardMessage(channelId, card, authorId);
       this.logger.log(`temporary start card sent to ${authorId} in ${channelId}`);
-    } catch (err: any) {
-      this.logger.error('send temporary start card failed: ' + (err?.message || err));
+    } catch (err: unknown) {
+      this.logger.error('send temporary start card failed: ' + (errorMessage(err, String(err))));
       this.sessionService.cancelPendingSession(session.id);
       await this.sendTempNotice(
         channelId,
         authorId,
-        `发起屏幕共享失败：${err?.message || '无法发送开始卡片，请稍后重试'}`,
+        `发起屏幕共享失败：${errorMessage(err, '无法发送开始卡片，请稍后重试')}`,
       );
     }
   }
@@ -518,13 +519,13 @@ export class KookService implements OnModuleInit {
     try {
       await this.bot?.sendTempCardMessage(event.targetId, card, event.userId);
       this.logger.log(`temporary button start card sent to ${event.userId} in ${event.targetId}`);
-    } catch (err: any) {
-      this.logger.error('temporary button start card failed: ' + (err?.message || err));
+    } catch (err: unknown) {
+      this.logger.error('temporary button start card failed: ' + (errorMessage(err, String(err))));
       this.sessionService.cancelPendingSession(session.id);
       await this.sendTempNotice(
         event.targetId,
         event.userId,
-        `发起屏幕共享失败：${err?.message || '无法发送开始卡片，请稍后重试'}`,
+        `发起屏幕共享失败：${errorMessage(err, '无法发送开始卡片，请稍后重试')}`,
       );
     }
   }
@@ -568,8 +569,8 @@ export class KookService implements OnModuleInit {
         }
       }
       this.logger.log(`public viewing card sent for ${event.sessionId}, msgId=${msgId || 'none'}`);
-    } catch (err: any) {
-      this.logger.error(`send public viewing card failed for ${event.sessionId}: ${err?.message || err}`);
+    } catch (err: unknown) {
+      this.logger.error(`send public viewing card failed for ${event.sessionId}: ${errorMessage(err, String(err))}`);
     } finally {
       this.publishingViewingCards.delete(event.sessionId);
     }
@@ -611,8 +612,8 @@ export class KookService implements OnModuleInit {
         });
         await this.bot.updateMessage(event.cardMessageId, JSON.stringify(endedShareCard), 10);
         this.logger.log(`ended card updated: ${event.cardMessageId}`);
-      } catch (err: any) {
-        this.logger.error('update ended card failed: ' + (err?.message || err));
+      } catch (err: unknown) {
+        this.logger.error('update ended card failed: ' + (errorMessage(err, String(err))));
         // 更新失败时，发送新卡片作为降级方案
         await this.sendNewEndedCard(event.targetChannelId, session, standardMinutes, estimatedCost);
       }
@@ -639,8 +640,8 @@ export class KookService implements OnModuleInit {
       });
       await this.bot?.sendCardMessage(targetChannelId, endedCard);
       this.logger.log(`new ended card sent to ${targetChannelId}`);
-    } catch (err: any) {
-      this.logger.error('send ended card failed: ' + (err?.message || err));
+    } catch (err: unknown) {
+      this.logger.error('send ended card failed: ' + (errorMessage(err, String(err))));
     }
   }
 
@@ -648,8 +649,8 @@ export class KookService implements OnModuleInit {
     const card = buildHelpCard({ triggerWords, showShareButton });
     try {
       await this.bot?.sendTempCardMessage(channelId, card, userId);
-    } catch (err: any) {
-      this.logger.error('send temp help card failed: ' + (err?.message || err));
+    } catch (err: unknown) {
+      this.logger.error('send temp help card failed: ' + (errorMessage(err, String(err))));
     }
   }
 
@@ -657,8 +658,8 @@ export class KookService implements OnModuleInit {
     if (!channelId || !userId) return;
     try {
       await this.bot?.sendTempTextMessage(channelId, message, userId);
-    } catch (err: any) {
-      this.logger.error(`send temporary notice failed: ${err?.message || err}`);
+    } catch (err: unknown) {
+      this.logger.error(`send temporary notice failed: ${errorMessage(err, String(err))}`);
     }
   }
 }

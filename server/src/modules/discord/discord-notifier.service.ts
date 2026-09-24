@@ -7,6 +7,7 @@ import {
   buildDiscordViewingCard,
   DiscordMessagePayload,
 } from './discord-message-builder';
+import { errorMessage, isAbortError } from '../../common/error-message';
 
 /**
  * 发送 Discord 消息的能力。
@@ -100,8 +101,8 @@ export class DiscordNotifierService implements OnModuleDestroy {
         this.sessionService.setCardMessageId(event.sessionId, messageId);
       }
       this.logger.log(`Discord viewing card published for session=${event.sessionId}`);
-    } catch (e: any) {
-      this.logger.error(`Discord viewing card failed: ${e?.message || e}`);
+    } catch (e: unknown) {
+      this.logger.error(`Discord viewing card failed: ${errorMessage(e, String(e))}`);
     } finally {
       this.publishing.delete(event.sessionId);
     }
@@ -128,8 +129,8 @@ export class DiscordNotifierService implements OnModuleDestroy {
       });
       await this.sender.editMessage(event.targetChannelId, event.cardMessageId, payload);
       this.logger.log(`Discord ended card updated for session=${event.sessionId}`);
-    } catch (e: any) {
-      this.logger.error(`Discord ended card failed: ${e?.message || e}`);
+    } catch (e: unknown) {
+      this.logger.error(`Discord ended card failed: ${errorMessage(e, String(e))}`);
     }
   }
 
