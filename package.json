@@ -13,8 +13,9 @@
     "build": "npm run build:web && npm run build:server",
     "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web",
     "test": "npm run test --workspace server && npm run test --workspace web",
-    "verify": "npm run typecheck && npm run build && npm run test",
-    "start": "npm run start:prod --workspace server"
+    "verify": "npm run typecheck && npm run lint && npm run build && npm run test",
+    "start": "npm run start:prod --workspace server",
+    "lint": "npm run lint --workspace server"
   },
   "engines": {
     "node": ">=20"
