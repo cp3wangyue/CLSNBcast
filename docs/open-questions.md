@@ -78,7 +78,7 @@
 | 5 | 管理 token 无法吊销 | `super-admin.controller.ts:37-59` | 7 天有效期内无法失效；重新绑定服务器不轮换 `server_secret` | Phase 5 |
 | 6 | favicon `type` 与实际格式不匹配 | `web/index.html:5` 声明 `type="image/svg+xml"` 但指向 PNG | 轻微；部分浏览器可能不加载 | **本轮改名一并修** |
 | 7 | ⏳ 无 CI、无 lint（**CI 已补，lint 仍缺**） | 全仓 | 没有自动化质量门禁 | **CI 已完成**：`.github/workflows/ci.yml` 在 push / PR 时跑 `npm run verify`（typecheck + build + test），实测通过。**lint 仍缺**：本仓从未引入 ESLint，且 `verify` 不含 lint，加进来需要先定规则集与存量告警的处理方式 |
-| 8 | 服务端类型检查宽松 | `server/tsconfig.json:15-16` `strictNullChecks: false` / `noImplicitAny: false` | 类型错误容易漏到运行时 | 不在 Phase 0 一次性收紧（会炸开改动面），后续单独评估 |
+| 8 | ✅ **`strictNullChecks` 已开启**（2026-09-25 评估后落地） | `server/tsconfig.json` | 类型错误容易漏到运行时 | **已开启**：实测仅 14 处报错（集中 2 个文件），改完 0 错误、0 新增依赖。文档原先担心「会炸开改动面」**不成立**。`noImplicitAny` **仍关闭** —— 它有 10 处报错，但全部是同一个根因：`better-sqlite3` 无类型声明且未装 `@types/better-sqlite3`，修它要新增依赖，超出「收紧类型」范围，留待决策 |
 | 9 | `kook.service.ts` 死代码 | `kook.service.ts:187-192` 拼了含 `appCertificate` 的 `serverConfig.agora`，无任何消费者 | 无用代码 + 明文证书在内存里多一份 | Phase 1 顺手清理 |
 | 10 | `.env.example` 不完整 | `.env.example` | 代码读取的 `KOOK_BOT_TOKEN`、`LEGACY_ADMIN_SUNSET_AT` 未记录 | Phase 4 |
 | 11 | ✅ `deploy.sh` 曾硬编码默认值 | `deploy.sh:4` `SSH_HOST=rainyun` | 换环境需改脚本 | **已修**：`SSH_HOST` 改为必填（环境变量或首个位置参数），缺失时在构建前报错；新增可选 `SSH_PORT` 与 `-h/--help` |
