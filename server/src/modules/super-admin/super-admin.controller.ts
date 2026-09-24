@@ -88,6 +88,11 @@ export class SuperAdminController {
       kookBotToken: cfg.kookBotToken ? '******' : '',
       kookVerifyToken: cfg.kookVerifyToken ? '******' : '',
       kookEncryptKey: cfg.kookEncryptKey ? '******' : '',
+      // Public Key 不是秘密，但同样用掩码避免面板上出现超长字符串
+      discordPublicKey: cfg.discordPublicKey || '',
+      // discordBotToken 是加密秘密，不在 GlobalConfig 里；
+      // 读不出来（无主密钥但有密文）时按「未配置」显示，不让面板报错
+      discordBotToken: this.hasSecret('discordBotToken') ? '******' : '',
       publicDomain: cfg.publicDomain,
       triggerWordLabels: cfg.triggerWordLabels,
       qualityBitrates: cfg.qualityBitrates,
@@ -121,6 +126,12 @@ export class SuperAdminController {
     if (dto.kookEncryptKey !== undefined && dto.kookEncryptKey !== '******') {
       this.crypto.setGlobalSecret('kookEncryptKey', dto.kookEncryptKey);
     }
+    if (dto.discordPublicKey !== undefined) {
+      this.db.setGlobalConfig('discordPublicKey', dto.discordPublicKey);
+    }
+    if (dto.discordBotToken !== undefined && dto.discordBotToken !== '******') {
+      this.crypto.setGlobalSecret('discordBotToken', dto.discordBotToken);
+    }
     if (dto.publicDomain !== undefined) {
       this.db.setGlobalConfig('publicDomain', dto.publicDomain);
     }
@@ -134,6 +145,15 @@ export class SuperAdminController {
       this.db.setTriggerWordLabels(labels);
     }
     return { ok: true };
+  }
+
+  /** 判断一个加密秘密是否已配置；读不出来时按未配置处理（不抛错到面板） */
+  private hasSecret(name: 'discordBotToken'): boolean {
+    try {
+      return !!this.crypto.getGlobalSecret(name);
+    } catch {
+      return false;
+    }
   }
 
   private sanitizeQualityBitrates(input: QualityBitrateConfig): QualityBitrateConfig {

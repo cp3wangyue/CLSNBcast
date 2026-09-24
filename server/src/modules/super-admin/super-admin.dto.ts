@@ -22,6 +22,14 @@ export class UpdateGlobalConfigDto {
 
   @IsOptional()
   @IsString()
+  discordPublicKey?: string;
+
+  @IsOptional()
+  @IsString()
+  discordBotToken?: string;
+
+  @IsOptional()
+  @IsString()
   publicDomain?: string;
 
   @IsOptional()
