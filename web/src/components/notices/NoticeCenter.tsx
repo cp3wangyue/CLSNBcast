@@ -9,6 +9,8 @@ import {
 } from 'react';
 import { AlertTriangle, Loader2, X } from 'lucide-react';
 import { api } from '../../lib/api';
+import { errorMessage } from '../../lib/utils';
+
 
 export type NoticePage = 'server_admin' | 'share' | 'view';
 
@@ -95,7 +97,7 @@ export function NoticeProvider({
     setError('');
     api.getNotices(page)
       .then((items) => setNotices(items as PublicNotice[]))
-      .catch((e) => setError(e.message || '无法加载页面通知'))
+      .catch((e) => setError(errorMessage(e, '无法加载页面通知')))
       .finally(() => setLoading(false));
   }, [page]);
 

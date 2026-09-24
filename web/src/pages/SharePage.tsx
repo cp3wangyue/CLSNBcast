@@ -4,7 +4,7 @@ import { AlertTriangle, Loader2, Link2, CheckCircle2, Monitor, Zap, ZapOff, Cloc
 import { api } from '../lib/api';
 import { useSessionSSE } from '../hooks/useSessionSSE';
 import { useScreenShare } from '../hooks/useScreenShare';
-import { copyToClipboard, cn } from '../lib/utils';
+import { copyToClipboard, cn, errorMessage } from '../lib/utils';
 import type {
   SessionInfo,
   QualityPresetOption,
@@ -324,7 +324,7 @@ export default function SharePage() {
             .catch(() => { clearActiveShare(); });
         }
       })
-      .catch((e) => { setLoadError(e.message || '加载失败'); setLoading(false); });
+      .catch((e) => { setLoadError(errorMessage(e, '加载失败')); setLoading(false); });
    }, [token]);
 
    // 未共享屏幕倒计时：基于绝对时间戳，避免后台/节能模式下 setTimeout 节流导致与服务器不同步
@@ -446,7 +446,7 @@ export default function SharePage() {
       if (resp.quality) setActiveSnapshot(resp.quality);
     } else {
       screenShare.stop();
-      setShareError(resp.message || '无法开始共享，可能已有其他人正在共享或链接已失效。');
+      setShareError(errorMessage(resp, '无法开始共享，可能已有其他人正在共享或链接已失效。'));
     }
   }, [
     screenShare, socket, useCustom, customDraft, selectedPreset, token, clientId, lowLatency, info,
@@ -477,7 +477,7 @@ export default function SharePage() {
       };
       const resp = await api.updateLiveQuality(token, payload);
       if (!resp.ok) {
-        setLiveError(resp.message || '切换失败');
+        setLiveError(errorMessage(resp, '切换失败'));
         return;
       }
       const result = await screenShare.setEncoderConfig({
@@ -488,12 +488,12 @@ export default function SharePage() {
         ...(payload.bitrateMax != null ? { bitrateMax: payload.bitrateMax } : {}),
       });
       if (!result.success) {
-        setLiveError(result.message || 'SDK 切换失败');
+        setLiveError(errorMessage(result, 'SDK 切换失败'));
         return;
       }
       if (resp.quality) setActiveSnapshot(resp.quality);
-    } catch (e: any) {
-      setLiveError(e?.message || '切换失败');
+    } catch (e: unknown) {
+      setLiveError(errorMessage(e, '切换失败'));
     } finally {
       setLiveSwitching(false);
     }

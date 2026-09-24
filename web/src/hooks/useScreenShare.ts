@@ -6,6 +6,7 @@ import type {
 } from 'agora-rtc-sdk-ng';
 import { api } from '../lib/api';
 import { installScreenAudioInterceptor } from '../lib/screenAudioCapture';
+import { errorMessage } from '../lib/utils';
 import type {
   VideoEncoderConfiguration,
   VideoSendStats,
@@ -147,10 +148,10 @@ export function useScreenShare(token: string, onTrackEnded?: () => void) {
         });
         setIsSharing(true);
         return { success: true };
-      } catch (e: any) {
+      } catch (e: unknown) {
         // 失败时清理已创建的 Agora 资源，避免泄漏
         await stop();
-        let msg = e?.message || String(e);
+        let msg = errorMessage(e, String(e));
         // 尝试解析 JSON 格式的错误消息（如 401 share ended）
         try {
           const parsed = JSON.parse(msg);
@@ -206,8 +207,8 @@ export function useScreenShare(token: string, onTrackEnded?: () => void) {
       try {
         await track.setEncoderConfiguration(config);
         return { success: true };
-      } catch (e: any) {
-        const message = e?.message || String(e);
+      } catch (e: unknown) {
+        const message = errorMessage(e, String(e));
         setError(message);
         return { success: false, message };
       }

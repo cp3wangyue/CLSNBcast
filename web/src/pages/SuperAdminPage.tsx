@@ -18,7 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { api, getSuperAdminToken, clearSuperAdminToken } from '../lib/api';
-import { cn } from '../lib/utils';
+import { cn, errorMessage } from '../lib/utils';
 import { ProviderManager } from '../components/providers/ProviderManager';
 import { QualityPresetPanel } from '../components/quality/QualityPresetPanel';
 import { UsageDashboardPanel } from '../components/usage/UsageDashboardPanel';
@@ -160,8 +160,8 @@ function ProvidersPanel() {
     try {
       setProviders(await api.getSuperProviders());
       setError('');
-    } catch (e: any) {
-      setError(e?.message || '加载失败');
+    } catch (e: unknown) {
+      setError(errorMessage(e, '加载失败'));
     } finally {
       setLoading(false);
     }
@@ -218,10 +218,10 @@ function SuperLoginForm({ onSuccess }: { onSuccess: () => void }) {
         localStorage.setItem('clsnbcast_super_token', res.token);
         onSuccess();
       } else {
-        setError(res.message || '登录失败');
+        setError(errorMessage(res, '登录失败'));
       }
-    } catch (err: any) {
-      setError(err.message || '网络错误');
+    } catch (err: unknown) {
+      setError(errorMessage(err, '网络错误'));
     } finally {
       setLoading(false);
     }
@@ -279,8 +279,8 @@ function GlobalConfigPanel() {
       await api.updateSuperConfig(config);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      alert(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -542,7 +542,7 @@ function NoticeManagementPanel() {
     setLoading(true);
     api.getSuperNotices()
       .then(setNotices)
-      .catch((e) => alert(e.message || '通知加载失败'))
+      .catch((e) => alert(errorMessage(e, '通知加载失败')))
       .finally(() => setLoading(false));
   };
 
@@ -587,8 +587,8 @@ function NoticeManagementPanel() {
       }
       setEditing(null);
       load();
-    } catch (e: any) {
-      alert(e.message || '保存失败');
+    } catch (e: unknown) {
+      alert(errorMessage(e, '保存失败'));
     } finally {
       setSaving(false);
     }
@@ -602,8 +602,8 @@ function NoticeManagementPanel() {
     setNotices(next);
     try {
       await api.reorderSuperNotices(next.map(notice => notice.id));
-    } catch (e: any) {
-      alert(e.message || '排序失败');
+    } catch (e: unknown) {
+      alert(errorMessage(e, '排序失败'));
       load();
     }
   };
@@ -1041,8 +1041,8 @@ function ServerDetailPanel({ serverId, onBack }: { serverId: string; onBack: () 
                 try {
                   await api.deleteSuperSpace('kook', serverId);
                   onBack();
-                } catch (e: any) {
-                  alert(e.message || '删除失败');
+                } catch (e: unknown) {
+                  alert(errorMessage(e, '删除失败'));
                   setDeleting(false);
                 }
               }}

@@ -7,7 +7,7 @@ import {
   getSpaceAdminToken,
   setSpaceAdminToken,
 } from '../lib/api';
-import { cn } from '../lib/utils';
+import { cn, errorMessage } from '../lib/utils';
 import { ProviderManager } from '../components/providers/ProviderManager';
 import type { AgoraProvider } from '../types';
 import { NoticeBanners, NoticeProvider } from '../components/notices/NoticeCenter';
@@ -210,10 +210,10 @@ function BindPage({ serverId, guildName, bindToken, onBind }: { serverId: string
       if (res.ok) {
         onBind();
       } else {
-        setError(res.message || '绑定失败');
+        setError(errorMessage(res, '绑定失败'));
       }
-    } catch (err: any) {
-      setError(err.message || '网络错误');
+    } catch (err: unknown) {
+      setError(errorMessage(err, '网络错误'));
     } finally {
       setLoading(false);
     }
@@ -282,10 +282,10 @@ function ServerLoginForm({ serverId, onSuccess }: { serverId: string; onSuccess:
         setSpaceAdminToken(PLATFORM, serverId, res.token);
         onSuccess();
       } else {
-        setError(res.message || '登录失败');
+        setError(errorMessage(res, '登录失败'));
       }
-    } catch (err: any) {
-      setError(err.message || '网络错误');
+    } catch (err: unknown) {
+      setError(errorMessage(err, '网络错误'));
     } finally {
       setLoading(false);
     }
@@ -362,8 +362,8 @@ function ServerConfigPanel({ serverId }: { serverId: string }) {
       await api.updateSpaceConfig(PLATFORM, serverId, payload);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -518,8 +518,8 @@ function SpaceProviderSection({ serverId }: { serverId: string }) {
     try {
       setProviders(await api.getSpaceProviders(PLATFORM, serverId));
       setError('');
-    } catch (e: any) {
-      setError(e?.message || '加载失败');
+    } catch (e: unknown) {
+      setError(errorMessage(e, '加载失败'));
     } finally {
       setLoading(false);
     }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { IAgoraRTCClient, IRemoteVideoTrack, IRemoteAudioTrack } from 'agora-rtc-sdk-ng';
 import { api } from '../lib/api';
+import { errorMessage } from '../lib/utils';
 
 const AgoraRTC = (window as any).AgoraRTC;
 AgoraRTC.setLogLevel(2);
@@ -120,9 +121,9 @@ export function useAgoraView(token: string, active: boolean, lowLatency: boolean
         );
         if (cancelled) return;
         setState((s) => ({ ...s, joined: true }));
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setState((s) => ({ ...s, error: e?.message || String(e) }));
+          setState((s) => ({ ...s, error: errorMessage(e, String(e)) }));
         }
       }
     };

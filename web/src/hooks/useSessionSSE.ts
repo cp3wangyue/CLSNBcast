@@ -123,7 +123,7 @@ export function useSessionSSE(token: string, role: 'publisher' | 'viewer') {
       try {
         const resp = await api.startSharing(token, quality, clientId, lowLatency, customQuality);
         return resp;
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error('startSharing fetch error:', e);
         return { ok: false };
       }
@@ -134,7 +134,7 @@ export function useSessionSSE(token: string, role: 'publisher' | 'viewer') {
   const stopSharing = useCallback(async () => {
     try {
       await api.stopSharing(token);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('stopSharing fetch error:', e);
     }
   }, [token]);

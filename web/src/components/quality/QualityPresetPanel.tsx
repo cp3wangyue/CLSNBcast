@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Pencil, Plus, Trash2, X, Check } from 'lucide-react';
 import { api } from '../../lib/api';
-import { cn } from '../../lib/utils';
+import { cn, errorMessage } from '../../lib/utils';
 import type { QualityPresetOption, QualityOptimizationMode, QualityCodec } from '../../types';
 
 interface Draft {
@@ -57,8 +57,8 @@ export function QualityPresetPanel() {
     try {
       setRows(await api.getSuperQualities());
       setError('');
-    } catch (e: any) {
-      setError(e?.message || '加载失败');
+    } catch (e: unknown) {
+      setError(errorMessage(e, '加载失败'));
     }
   };
 
@@ -87,12 +87,12 @@ export function QualityPresetPanel() {
       const result = editingId
         ? await api.updateSuperQuality(editingId, payload)
         : await api.createSuperQuality({ id: draft.id.trim(), ...payload });
-      if (!result.ok) { setError(result.message || '保存失败'); return; }
+      if (!result.ok) { setError(errorMessage(result, '保存失败')); return; }
       await reload();
       setDraft(null);
       setEditingId(null);
-    } catch (e: any) {
-      setError(e?.message || '保存失败');
+    } catch (e: unknown) {
+      setError(errorMessage(e, '保存失败'));
     } finally {
       setBusy(false);
     }
@@ -101,14 +101,14 @@ export function QualityPresetPanel() {
   const remove = async (preset: QualityPresetOption) => {
     if (!confirm(`确定删除画质「${preset.label}」？`)) return;
     const result = await api.deleteSuperQuality(preset.id);
-    if (!result.ok) setError(result.message || '删除失败');
+    if (!result.ok) setError(errorMessage(result, '删除失败'));
     await reload();
   };
 
   const toggleEnabled = async (preset: QualityPresetOption) => {
     setBusy(true);
     const result = await api.updateSuperQuality(preset.id, { enabled: !preset.enabled });
-    if (!result.ok) setError(result.message || '操作失败');
+    if (!result.ok) setError(errorMessage(result, '操作失败'));
     await reload();
     setBusy(false);
   };

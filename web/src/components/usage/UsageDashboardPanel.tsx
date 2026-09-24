@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Activity, AlertTriangle, BarChart3, Loader2, RefreshCw } from 'lucide-react';
 import { api } from '../../lib/api';
-import { cn } from '../../lib/utils';
+import { cn, errorMessage } from '../../lib/utils';
 import type { UsageDashboardRow } from '../../types';
 
 const OWNER_LABEL: Record<string, string> = {
@@ -54,8 +54,8 @@ export function UsageDashboardPanel() {
       setPeriod(data.period);
       setTimezone(data.timezone);
       setError('');
-    } catch (e: any) {
-      setError(e?.message || '加载失败');
+    } catch (e: unknown) {
+      setError(errorMessage(e, '加载失败'));
     } finally {
       setLoading(false);
     }
@@ -70,8 +70,8 @@ export function UsageDashboardPanel() {
     try {
       await api.rebuildSuperUsage();
       await reload();
-    } catch (e: any) {
-      setError(e?.message || '重算失败');
+    } catch (e: unknown) {
+      setError(errorMessage(e, '重算失败'));
     } finally {
       setRebuilding(false);
     }

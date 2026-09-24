@@ -12,6 +12,7 @@ import type {
   QualityOptimizationMode,
   QualityCodec,
 } from '../types';
+import { errorMessage } from './utils';
 
 const SUPER_TOKEN_KEY = 'clsnbcast_super_token';
 export type Platform = 'kook' | 'qq' | 'discord';
@@ -130,7 +131,7 @@ async function superRequest<T>(
     let serverMsg = '';
     try {
       const data = await res.json();
-      serverMsg = data?.message || '';
+      serverMsg = errorMessage(data, '');
     } catch {
       serverMsg = res.statusText;
     }
@@ -157,7 +158,7 @@ async function serverRequest<T>(
     let serverMsg = '';
     try {
       const data = await res.json();
-      serverMsg = data?.message || '';
+      serverMsg = errorMessage(data, '');
     } catch {
       serverMsg = res.statusText;
     }
@@ -183,7 +184,7 @@ async function spaceRequest<T>(
     let serverMsg = '';
     try {
       const data = await res.json();
-      serverMsg = data?.message || '';
+      serverMsg = errorMessage(data, '');
     } catch {
       serverMsg = res.statusText;
     }

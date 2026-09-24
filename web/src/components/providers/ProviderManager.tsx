@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Activity, Check, KeyRound, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { cn } from '../../lib/utils';
+import { cn, errorMessage } from '../../lib/utils';
 import type { AgoraProvider, AgoraProviderFormInput, AgoraProviderOwnerType } from '../../types';
 
 /**
@@ -173,13 +173,13 @@ export function ProviderManager({
 
       const result = editingId ? await onUpdate(editingId, payload) : await onCreate(payload);
       if (!result.ok) {
-        setError(result.message || '保存失败');
+        setError(errorMessage(result, '保存失败'));
         return;
       }
       await onReload();
       cancel();
-    } catch (e: any) {
-      setError(e?.message || '保存失败');
+    } catch (e: unknown) {
+      setError(errorMessage(e, '保存失败'));
     } finally {
       setBusy(false);
     }
@@ -192,7 +192,7 @@ export function ProviderManager({
     setError('');
     const result = await onDelete(provider.id);
     if (!result.ok) {
-      setError(result.message || '删除失败');
+      setError(errorMessage(result, '删除失败'));
       return;
     }
     await onReload();

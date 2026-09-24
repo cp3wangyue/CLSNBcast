@@ -17,7 +17,7 @@ import {
 import { api } from '../lib/api';
 import { useSessionSSE } from '../hooks/useSessionSSE';
 import { useAgoraView } from '../hooks/useAgoraView';
-import { cn, copyToClipboard } from '../lib/utils';
+import { cn, copyToClipboard, errorMessage } from '../lib/utils';
 import type { SessionInfo } from '../types';
 import { NoticeBanners } from '../components/notices/NoticeCenter';
 
@@ -53,7 +53,7 @@ export default function ViewPage() {
         setLoading(false);
       })
       .catch((e) => {
-        setLoadError(e.message || '加载失败');
+        setLoadError(errorMessage(e, '加载失败'));
         setLoading(false);
       });
   }, [token]);
