@@ -12,6 +12,15 @@ import type { QualityPreset, QualitySnapshot } from '../quality/quality-preset.t
 
 // ===== Types =====
 
+/**
+ * better-sqlite3 返回的原始行。
+ *
+ * SQLite 的列在编译期不可知（且会随迁移增减），所以无法给出精确结构；
+ * 但用 `Record<string, unknown>` 而不是 `any` 能保留一层约束：
+ * 取值后必须显式收窄，不会像 `any` 那样把任意属性访问都放行。
+ */
+export type DbRow = Record<string, any>;
+
 export interface GlobalConfig {
   kookBotToken: string;
   kookVerifyToken: string;
@@ -532,7 +541,7 @@ export class DatabaseService implements OnModuleDestroy {
   }
 
   /** 将数据库行（下划线字段名）映射为 ServerSession（驼峰字段名） */
-  private mapSessionRow(row: any): ServerSession {
+  private mapSessionRow(row: DbRow): ServerSession {
     return {
       id: row.id,
       token: row.token,
@@ -572,7 +581,7 @@ export class DatabaseService implements OnModuleDestroy {
   }
 
   /** 将数据库行（下划线字段名）映射为 ServerRecord（驼峰字段名） */
-  private mapServerRow(row: any): ServerRecord {
+  private mapServerRow(row: DbRow): ServerRecord {
     return {
       serverId: row.server_id,
       platform: normalizePlatform(row.platform),
@@ -766,7 +775,7 @@ export class DatabaseService implements OnModuleDestroy {
   // ===== Agora Providers =====
 
   /** 将数据库行（下划线字段名）映射为 AgoraProviderRecord（驼峰字段名） */
-  private mapProviderRow(row: any): AgoraProviderRecord {
+  private mapProviderRow(row: DbRow): AgoraProviderRecord {
     return {
       id: row.id,
       ownerType: row.owner_type,
@@ -1112,7 +1121,7 @@ export class DatabaseService implements OnModuleDestroy {
   // 计费语义（何时该开区间、系数怎么取、如何汇总）都在 UsageLedgerService 里，
   // 与 AgoraProviderService 的分工一致。
 
-  private mapUsageEventRow(row: any): UsageEventRecord {
+  private mapUsageEventRow(row: DbRow): UsageEventRecord {
     return {
       id: row.id,
       sessionId: row.session_id,
@@ -1132,7 +1141,7 @@ export class DatabaseService implements OnModuleDestroy {
     };
   }
 
-  private mapUsageIntervalRow(row: any): UsageIntervalRecord {
+  private mapUsageIntervalRow(row: DbRow): UsageIntervalRecord {
     return {
       id: row.id,
       sessionId: row.session_id,
@@ -1158,7 +1167,7 @@ export class DatabaseService implements OnModuleDestroy {
     };
   }
 
-  private mapProviderUsageMonthlyRow(row: any): ProviderUsageMonthlyRecord {
+  private mapProviderUsageMonthlyRow(row: DbRow): ProviderUsageMonthlyRecord {
     return {
       providerId: row.provider_id,
       periodKey: row.period_key,
@@ -1542,7 +1551,7 @@ export class DatabaseService implements OnModuleDestroy {
     return Number(row?.c ?? 0);
   }
 
-  private mapQualityPresetRow(row: any): QualityPreset {
+  private mapQualityPresetRow(row: DbRow): QualityPreset {
     return {
       id: row.id,
       label: row.label,
