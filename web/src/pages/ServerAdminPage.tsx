@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings, ListChecks, LogOut, ShieldCheck, ExternalLink } from 'lucide-react';
+import { Settings, ListChecks, LogOut, ShieldCheck } from 'lucide-react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import {
   api,
@@ -354,7 +354,11 @@ function ServerConfigPanel({ serverId }: { serverId: string }) {
     try {
       // Agora 凭证已改由 Provider 管理，这三个字段不再由本页提交，
       // 避免把面板里的空值/掩码写回数据库。
-      const { agoraAppId, agoraAppCertificate, agoraTokenExpireSec, ...payload } = config;
+      // 用 delete 而非解构：解构会产生三个未使用的绑定，反而掩盖了"刻意剔除"的意图
+      const payload: Record<string, unknown> = { ...config };
+      delete payload.agoraAppId;
+      delete payload.agoraAppCertificate;
+      delete payload.agoraTokenExpireSec;
       await api.updateSpaceConfig(PLATFORM, serverId, payload);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);

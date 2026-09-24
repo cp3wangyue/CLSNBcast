@@ -13,7 +13,6 @@ import type {
   QualityIssue,
   QualityOptimizationMode,
   QualityCodec,
-  QualityLimits,
   VideoSendStats,
 } from '../types';
 import { validateCustomQuality } from '../lib/qualityValidation';
@@ -326,9 +325,9 @@ export default function SharePage() {
         }
       })
       .catch((e) => { setLoadError(e.message || '加载失败'); setLoading(false); });
-	  }, [token]);
+   }, [token]);
 
-	  // 未共享屏幕倒计时：基于绝对时间戳，避免后台/节能模式下 setTimeout 节流导致与服务器不同步
+   // 未共享屏幕倒计时：基于绝对时间戳，避免后台/节能模式下 setTimeout 节流导致与服务器不同步
   useEffect(() => {
     if (socket.idleRemainingSec != null && socket.idleRemainingSec > 0) {
       idleDeadlineRef.current = Date.now() + socket.idleRemainingSec * 1000;

@@ -155,7 +155,7 @@ export function useScreenShare(token: string, onTrackEnded?: () => void) {
         try {
           const parsed = JSON.parse(msg);
           if (parsed.message) msg = parsed.message;
-        } catch {}
+        } catch { /* 非 JSON 错误串，保持原文 */ }
         if (msg.includes('PERMISSION_DENIED') || msg.includes('NotAllowedError')) {
           if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
             msg = '屏幕采集需要 HTTPS 环境才能使用。请通过 https:// 域名访问本页面，当前是 ' + location.protocol + '//' + location.host;

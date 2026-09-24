@@ -101,12 +101,12 @@ export function useAgoraView(token: string, active: boolean, lowLatency: boolean
           if (mediaType === 'video') {
             // 停止播放并移除 Agora 在容器中创建的 <video> 元素，
             // 否则分享者暂停/停止发布后画面中央会残留原生播放器占位图标
-            try { user?.videoTrack?.stop(); } catch {}
+            try { user?.videoTrack?.stop(); } catch { /* 释放失败无需处理 */ }
             videoRef.current = null;
             setState((s) => ({ ...s, hasVideo: false }));
           }
           if (mediaType === 'audio') {
-            try { user?.audioTrack?.stop(); } catch {}
+            try { user?.audioTrack?.stop(); } catch { /* 释放失败无需处理 */ }
             audioRef.current = null;
             setState((s) => ({ ...s, hasAudio: false }));
           }

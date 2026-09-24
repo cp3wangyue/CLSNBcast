@@ -9,7 +9,6 @@ import type {
   QualitySnapshot,
   CustomQualityInput,
   QualityIssue,
-  QualityLimits,
   QualityOptimizationMode,
   QualityCodec,
 } from '../types';
