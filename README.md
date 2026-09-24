@@ -1,6 +1,7 @@
 # CLSNBcast · 屏幕共享
 
-聊天软件快捷屏幕共享工具。在频道发条消息即可发起共享，观众免登录观看。当前支持 **KOOK**。
+聊天软件快捷屏幕共享工具。在频道发条消息即可发起共享，观众免登录观看。
+当前支持 **KOOK** 与 **Discord**。
 
 基于 Agora 声网 RTC 做音视频传输，其余部分（前端、后端、Bot、数据库、Session 管理、Agora 凭证管理、RTC Token 签发）全部自托管，可部署在自己的 Linux VPS 上。
 
@@ -22,7 +23,8 @@
 | 后端 | NestJS 10 + Express |
 | 前端 | React 18 + Vite 5 + TypeScript + Tailwind CSS |
 | 数据库 | SQLite（better-sqlite3，WAL 模式） |
-| Bot | KOOK Webhook（收件箱表 + 幂等 worker） |
+| Bot | 入站 Webhook：KOOK（AES 解密 + verify_token）、Discord（Ed25519 签名） |
+| 平台抽象 | `modules/platform`（平台注册表；鉴权走严格解析，读取走归一化） |
 | 实时通道 | SSE（发布端心跳 + 状态推送） |
 | 音视频 | Agora Web SDK NG（RTC Token 由本服务端签发） |
 
@@ -60,6 +62,52 @@
 
 ---
 
+## Discord 使用指南
+
+### 1. 配置凭证
+
+在超管面板「全局配置」填写：
+
+| 字段 | 说明 |
+|---|---|
+| Discord Public Key | 应用面板的 Public Key（hex）。不是秘密，原样显示便于核对 |
+| Discord Bot Token | **加密存储**（与 KOOK Bot Token 同级，泄露即可冒充机器人） |
+
+Bot Token 配置并重启后，机器人才能真正发送**观看卡片**与**结束卡片**；
+未配置时日志会告警并跳过发送，其余功能不受影响。
+
+### 2. 设置 Interactions Endpoint URL
+
+在 Discord 开发者后台把应用的 **Interactions Endpoint URL** 填为：
+
+```
+https://<你的域名>/api/integrations/discord/webhook
+```
+
+Discord 保存时会发一次 PING 校验端点连通性——签名校验通过即配置成功。
+请求体按**原始字节**验签，因此该路由已注册 `bodyParser.raw`。
+
+### 3. 发起共享
+
+在频道发送 **`/share`** 斜杠命令（需先在 Discord 注册该命令）。机器人会返回
+**仅你可见**的分享链接（含会话 token，故必须 ephemeral）。
+
+| 场景 | 行为 |
+|---|---|
+| 服务器未绑定 / 已停用 | 提示先完成绑定，不创建会话 |
+| 无可用 Agora Provider | 提示联系管理员配置凭证，不创建会话 |
+| 连续触发 | 冷却拦截（用户 + 频道维度，5 秒） |
+| 发布端真正开始后 | 在频道发**公开观看卡片** |
+| 共享结束 | 把该卡片更新为结束卡片（时长 / 观看人次 / 标准分钟 / 预估费用） |
+
+### 已知限制
+
+- 仅实现了 `/share` 一个命令；组件交互（按钮）尚不支持（仍会 ACK，不会显示超时）
+- 私信场景无 `guild_id`，无法归属到服务器，故不支持
+- 真实推流需在 HTTPS 环境下使用
+
+---
+
 ## 部署
 
 完整部署说明（含反向代理与 HTTPS 配置）见 [DEPLOY.md](./DEPLOY.md)。
@@ -70,6 +118,12 @@
 # 1. 配置环境变量
 cp .env.example .env
 vim .env                       # 至少填写 SUPER_ADMIN_PASSWORD
+
+# ⚠️ 强烈建议同时设置 SECRET_ENCRYPTION_KEY（openssl rand -hex 32）
+#    它用于加密 Agora App Certificate、KOOK/Discord Bot Token 等秘密。
+#    未设置时这些秘密无法写入（加密会抛错，不会静默降级为明文）。
+#    一旦库中已有密文，缺失该变量会导致启动失败（这是刻意的，避免带着
+#    读不出凭证的状态继续运行）。务必备份：丢失后库中凭证无法解密。
 
 # 2. 本地构建前端与后端产物（镜像内不编译，只装载 dist）
 npm install
@@ -94,6 +148,7 @@ docker compose up -d --build
 | `PORT` | | 服务端口，默认 `3520` |
 | `ALLOWED_ORIGINS` | | CORS 额外允许的域名，逗号分隔。不设则仅允许本地开发域名 |
 | `KOOK_API_TIMEOUT_MS` | | KOOK HTTP API 请求超时（毫秒），默认 `10000` |
+| `DISCORD_API_TIMEOUT_MS` | | Discord REST API 请求超时（毫秒），默认 `10000` |
 | `KOOK_BOT_TOKEN` | | 首次启动时播种到数据库。也可登录超管面板后填写 |
 
 > Agora 凭证不在环境变量配置 —— 机器人加入服务器后，由频道主在管理面板中为每个服务器独立配置。
@@ -108,9 +163,11 @@ SQLite 数据库位于容器内 `/app/data/clsnbcast.db`，通过命名卷 `clsn
 
 ```
 server/src/modules/
+├── platform/       平台注册表（枚举 / 归一化 / 严格解析）
 ├── database/       SQLite 数据层（表结构、迁移、配置）
 ├── agora/          Agora RTC Token 签发
 ├── kook/           KOOK Bot：Webhook 收件箱 + 幂等 worker + 卡片构建
+├── discord/        Discord Bot：签名校验 + 斜杠命令 + 消息发送 + 卡片广播
 ├── session/        会话生命周期（状态机、观众计数、计费区间、watchdog）
 ├── share/          共享页 API（info / token / start / stop）
 ├── auth/           分享链接鉴权 Guard
