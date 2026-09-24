@@ -19,6 +19,7 @@ import { AgoraProviderService } from '../agora/agora-provider.service';
 import { QualityConfigService } from '../quality/quality-config.service';
 import { QualityPresetService } from '../quality/quality-preset.service';
 import { SecretCryptoService } from '../crypto/secret-crypto.service';
+import { normalizePlatform } from '../platform/platform.types';
 import {
   CreateSpaceProviderDto,
   UpdateSpaceProviderDto,
@@ -42,7 +43,8 @@ export class ServerAdminController {
   ) {}
 
   private resolveSpace(params: Record<string, string>) {
-    const platform = params.platform || 'kook';
+    // 存量 KOOK 路由是 /api/server/:serverId，没有 platform 段，靠归一化兜底。
+    const platform = normalizePlatform(params.platform);
     const externalId = params.externalId || params.serverId || '';
     return {
       platform,

@@ -7,6 +7,7 @@ import { getDefaultQualityBitrates, QualityBitrateConfig } from '../session/sess
 import { runMigrations } from './migration-runner';
 import { MIGRATIONS } from './migrations';
 import { parseTriggerWords, setGlobalConfig } from './migrations/helpers';
+import { normalizePlatform } from '../platform/platform.types';
 import type { QualityPreset, QualitySnapshot } from '../quality/quality-preset.types';
 
 // ===== Types =====
@@ -31,7 +32,7 @@ export interface KookWebhookEventRecord {
 
 export interface ServerRecord {
   serverId: string;       // 兼容字段：内部 spaceId，现有 KOOK 数据仍等于 guild_id
-  platform: string;       // 'kook'，未来可扩展 'qq' | 'discord'
+  platform: string;       // 平台标识，取值见 modules/platform/platform.types.ts
   externalId: string;     // 平台外部 ID；KOOK 为 guild_id 雪花 ID
   openId: string;         // open_id 公开 ID（用于面板显示）
   guildName: string;
@@ -470,11 +471,25 @@ export class DatabaseService implements OnModuleDestroy {
     return rows.map(row => this.mapServerRow(row));
   }
 
+  /**
+   * 按平台 + 外部 ID 寻址。
+   *
+   * 传入的 platform 先归一化，再与库中值比较。这样未标注平台的存量行
+   * （`platform` 列是后来迁移加上的，早期行可能为空字符串）仍能被寻址到，
+   * 而不会因为一次平台抽象就凭空消失。
+   *
+   * SQL 里同时列出归一化的目标值与空字符串，是为了继续命中
+   * `idx_servers_platform_external_id(platform, external_id)` 联合索引 ——
+   * 只按 external_id 查会退化为全表扫描。
+   */
   getSpace(platform: string, externalId: string): ServerRecord | undefined {
+    const wanted = normalizePlatform(platform);
     const row = this.db.prepare(
-      'SELECT * FROM servers WHERE platform = ? AND external_id = ?',
-    ).get(platform, externalId) as any;
+      'SELECT * FROM servers WHERE external_id = ? AND (platform = ? OR platform = ?)',
+    ).get(externalId, wanted, '') as any;
     if (!row) return undefined;
+    // 库中值再次归一化兜底：历史上可能存在既非空串、又非登记值的脏数据。
+    if (normalizePlatform(row.platform) !== wanted) return undefined;
     return this.mapServerRow(row);
   }
 
@@ -554,7 +569,7 @@ export class DatabaseService implements OnModuleDestroy {
   private mapServerRow(row: any): ServerRecord {
     return {
       serverId: row.server_id,
-      platform: row.platform || 'kook',
+      platform: normalizePlatform(row.platform),
       externalId: row.external_id || row.server_id,
       openId: row.open_id,
       guildName: row.guild_name,
@@ -589,8 +604,18 @@ export class DatabaseService implements OnModuleDestroy {
    * @param ownerId 服务器主 user_id
    * @param ownerUsername 服务器主用户名
    * @param openId open_id 公开 ID（用于面板显示）
+   * @param platform 平台标识；不传则用 DEFAULT_PLATFORM（当前为 'kook'）。
+   *       存量调用方全部是 KOOK 路径，因此默认值保持不变。
    */
-  createServer(serverId: string, guildName: string, ownerId: string, ownerUsername: string, openId?: string): ServerRecord {
+  createServer(
+    serverId: string,
+    guildName: string,
+    ownerId: string,
+    ownerUsername: string,
+    openId?: string,
+    platform?: string,
+  ): ServerRecord {
+    const platformId = normalizePlatform(platform);
     const now = Date.now();
     const globalCfg = this.getGlobalConfig();
     
@@ -621,9 +646,10 @@ export class DatabaseService implements OnModuleDestroy {
         owner_username, bound, status, public_domain, trigger_words,
         server_secret, created_at, updated_at
       )
-      VALUES (?, 'kook', ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?, ?)
     `).run(
       serverId,
+      platformId,
       serverId,
       openId || '',
       guildName,

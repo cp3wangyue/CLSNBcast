@@ -26,6 +26,8 @@ export const baseline: Migration = {
 
       CREATE TABLE IF NOT EXISTS servers (
         server_id              TEXT PRIMARY KEY,  -- guild_id 雪花 ID（不变，用于主键和 URL）
+        -- 平台标识。SQL 默认值是历史契约，不可更改（改了会让新库与存量库结构分叉）；
+        -- 平台取值的**事实来源**是 modules/platform/platform.types.ts 的 SUPPORTED_PLATFORMS。
         platform               TEXT NOT NULL DEFAULT 'kook',
         external_id            TEXT NOT NULL DEFAULT '',
         open_id                TEXT NOT NULL DEFAULT '',  -- open_id 公开 ID（用于面板显示）

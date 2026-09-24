@@ -12,6 +12,7 @@ import { safeEqual } from './modules/auth/safe-compare';
 import * as bodyParser from 'body-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { DEFAULT_PLATFORM, normalizePlatform } from './modules/platform/platform.types';
 import { DatabaseService } from './modules/database/database.service';
 import { installLogScrubber } from './modules/logging/log-scrubber';
 
@@ -194,13 +195,16 @@ async function bootstrap() {
     } else if (payload.role === 'space_admin') {
       const legacyMatch = path.match(/^\/api\/server\/([^/]+)/);
       const spaceMatch = path.match(/^\/api\/spaces\/([^/]+)\/([^/]+)/);
+      // legacy 路由没有 platform 段，它历史上只对应默认平台（KOOK）；
+      // 非默认平台的 token 必须走 canonical 路由，否则会绕过平台归属校验。
+      const tokenPlatform = normalizePlatform(payload.platform);
       const legacyAllowed =
-        payload.platform === 'kook' &&
+        tokenPlatform === DEFAULT_PLATFORM &&
         legacyMatch &&
         payload.externalId === legacyMatch[1];
       const canonicalAllowed =
         spaceMatch &&
-        payload.platform === spaceMatch[1] &&
+        tokenPlatform === normalizePlatform(spaceMatch[1]) &&
         payload.externalId === spaceMatch[2];
       if (!legacyAllowed && !canonicalAllowed) {
         return res.status(403).json({ message: '无权访问此平台空间' });
